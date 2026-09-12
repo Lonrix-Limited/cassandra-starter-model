@@ -1,6 +1,6 @@
 # Next session
 
-**Updated:** 2026-09-12 · **StarterModel** — not a git repository
+**Updated:** 2026-09-12 · **main** @ cffcb58
 
 ## Where things stand
 
