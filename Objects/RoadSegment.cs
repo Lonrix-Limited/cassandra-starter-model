@@ -34,32 +34,32 @@ public class RoadSegment
     }
 
     /// <summary>
-    /// Segment identifier. Maps to input column "file_seg_name".
+    /// Segment identifier. Maps to input column "inp_seg_code".
     /// </summary>
     public string SegmentName { get; set; } = string.Empty;
 
     /// <summary>
-    /// Section ID. Maps to "file_section_id".
+    /// Section ID. Maps to "inp_section_id".
     /// </summary>
     public double SectionID { get; set; }
 
     /// <summary>
-    /// Name of the section. Maps to "file_section_name".
+    /// Name of the section. Maps to "inp_section_name".
     /// </summary>
     public string SectionName { get; set; } = string.Empty;
 
     /// <summary>
-    /// Start metre of the segment. Maps to "file_loc_from".
+    /// Start metre of the segment. Maps to "inp_loc_from".
     /// </summary>
     public double LocFrom { get; set; }
 
     /// <summary>
-    /// End metre of the segment. Maps to "file_loc_to".
+    /// End metre of the segment. Maps to "inp_loc_to".
     /// </summary>
     public double LocTo { get; set; }
 
     /// <summary>
-    /// Lane code. Maps to "file_lane_name".
+    /// Lane code. Maps to "inp_lane".
     /// </summary>
     public string LaneCode { get; set; } = string.Empty;
 
@@ -78,7 +78,8 @@ public class RoadSegment
     public double AreaSquareMetre { get; set; }
 
     /// <summary>
-    /// Width in metres. By default, this is calculated on initialisation from Area and Length
+    /// Width in metres. Read directly from input column "inp_width" - it is no longer derived from Area
+    /// and Length, because Length can be zero.
     /// </summary>
     public double WidthInMetre { get; set; }
 
@@ -164,7 +165,7 @@ public class RoadSegment
     public string NextSurface { get; set; } = string.Empty;
 
     /// <summary>
-    /// Surfacing date as a text/string value in dd/mm/yyyy format.
+    /// Surfacing date as a text/string value in ISO format 'yyyymmdd', as parsed by ParseISODateNoTime.
     /// </summary>
     public string SurfacingDateString { get; set; } = string.Empty;
 
@@ -288,7 +289,7 @@ public class RoadSegment
 
     
     /// <summary>
-    /// Pavement construction date as a text/string value in dd/mm/yyyy format.
+    /// Pavement construction date as a text/string value in ISO format 'yyyymmdd', as parsed by ParseISODateNoTime.
     /// </summary>
     public string PavementDateString { get; set; } = string.Empty;
 
