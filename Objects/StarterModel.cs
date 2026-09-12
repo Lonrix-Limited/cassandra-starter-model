@@ -12,13 +12,9 @@ public class StarterModel : DomainModelBase
     private Resetter _resetter { get; set; } = null!;
     private Incrementer _incrementer { get; set; } = null!;
 
-    public FlushingModel FlushingModel = null!;
-    public EdgeBreakModel EdgeBreakModel = null!;
-    public ScabbingModel ScabbingModel = null!;
-    public LTCracksModel LTCracksModel = null!;
-    public MeshCrackModel MeshCrackModel = null!;
-    public ShovingModel ShovingModel = null!;
-    public PotholeModel PotholeModel = null!;
+    // STAGE 2 (Incrementer): the seven jFunction-era S-curve distress models that used to be held here have
+    // been removed along with the distresses they modelled. The replacement increment models for rutting,
+    // roughness, cracking, flushing and ravelling are still to be specified, and will be set up here.
 
     public Dictionary<string, TreatmentStrategy> CandidateStrategies = null!;
 
@@ -40,7 +36,6 @@ public class StarterModel : DomainModelBase
             _resetter = new Resetter(this.model, this);
             _incrementer = new Incrementer(this.model, this);
             this.Constants = new Constants(this.model.Lookups);
-            this.SetupDistressModels();
 
         }
         catch (Exception ex)
@@ -50,31 +45,6 @@ public class StarterModel : DomainModelBase
         }        
     }
 
-    private void SetupDistressModels()
-    {
-
-        this.FlushingModel = new FlushingModel(this.model);
-        FlushingModel.Setup("s_curve_default");
-
-        this.EdgeBreakModel = new EdgeBreakModel(this.model);
-        EdgeBreakModel.Setup("s_curve_default");
-
-        this.ScabbingModel = new ScabbingModel(this.model);
-        ScabbingModel.Setup("s_curve_default");
-
-        this.LTCracksModel = new LTCracksModel(this.model);
-        LTCracksModel.Setup("s_curve_default");
-
-        this.MeshCrackModel = new MeshCrackModel(this.model);
-        MeshCrackModel.Setup("s_curve_default");
-
-        this.ShovingModel = new ShovingModel(this.model);
-        ShovingModel.Setup("s_curve_default");
-        
-        this.PotholeModel = new PotholeModel(this.model);
-        PotholeModel.Setup("s_curve_potholes");
-
-    }
 
     /// <summary>
     /// Evaluates the Initial Values for all parameters for the element at the start of the analysis. This method is called from the Framework Model 

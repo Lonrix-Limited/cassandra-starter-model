@@ -403,11 +403,6 @@ public class RoadSegment
     public double HeavyVehiclePercentage { get; set; }
 
     /// <summary>
-    /// Number of bus routes (not in use).
-    /// </summary>
-    public double NumberOfBusRoutes { get; set; }
-
-    /// <summary>
     /// Traffic growth percentage.
     /// </summary>
     public double TrafficGrowthPercent { get; set; }
@@ -425,318 +420,190 @@ public class RoadSegment
 
     #endregion
 
-    #region Faults and Maintenance
+    #region Historical Maintenance
 
-    private double _faultsAndMaintenanceSurfacingM2;
-    private double _faultsAndMaintenancePavementM2;
-    private double _faultsAndMaintenanceSurfacingPercent;
-    private double _faultsAndMaintenancePavementPercent;
-
-    /// <summary>
-    /// Surfacing faults area in square metres. Depending on how inputs are prepared, this field may include
-    /// any recent historical maintenance. Updating this value will also update the FaultsAndMaintenanceSurfacingPercent 
-    /// property based on the AreaSquareMetre.
-    /// </summary>
-    public double FaultsAndMaintenanceSurfacingM2
-    {
-        get
-        {
-            return _faultsAndMaintenanceSurfacingM2;
-        }
-        set
-        {
-            _faultsAndMaintenanceSurfacingM2 = value;
-            // Calculate the percentage of faults and maintenance based on the area.
-            if (this.AreaSquareMetre > 0)
-            {
-                _faultsAndMaintenanceSurfacingPercent = (value / this.AreaSquareMetre) * 100.0;
-            }
-            else
-            {
-                _faultsAndMaintenanceSurfacingPercent = 0.0;
-            }
-        }
-    }
+    // NOTE: Maintenance is NOT modelled forward in time. Every property in this region is a
+    // HISTORICAL record taken from the client's input data, describing work already carried out
+    // before the model's base date. The values are read once from the raw input and never change
+    // over the modelling periods - a treatment applied by the model does not reset them, and no
+    // increment model advances them.
+    //
+    // Their purpose is to inform treatment selection in the early periods: a segment that has
+    // needed repeated patching recently is a different proposition from one that has not. The
+    // trigger logic that uses them is specified separately.
 
     /// <summary>
-    /// Percentage of Surfacing related Faults and Maintenance - calculated on the basis of FaultsAndMaintenanceSurfacingM2 and AreaSquareMetre.
+    /// Pavement maintenance extent over the LAST YEAR, as a percentage of sub-segments with
+    /// maintenance recorded. Historical record from the input data - not modelled forward.
     /// </summary>
-    public double FaultsAndMaintenanceSurfacingPercent { get { return _faultsAndMaintenanceSurfacingPercent; } }
+    public double MaintPavementExtentLastYear { get; set; }
 
     /// <summary>
-    /// Pavement faults area in square metres. Depending on how inputs are prepared, this field may include
-    /// any recent historical maintenance. Updating this value will also update the FaultsAndMaintenancePavementPercent 
-    /// property based on the AreaSquareMetre.
+    /// Pavement maintenance extent over the LAST THREE YEARS, as a percentage of sub-segments with
+    /// maintenance recorded. Historical record from the input data - not modelled forward.
     /// </summary>
-    public double FaultsAndMaintenancePavementM2
-    {
-        get
-        {
-            return _faultsAndMaintenancePavementM2;
-        }
-        set
-        {
-            _faultsAndMaintenancePavementM2 = value;
-            // Calculate the percentage of faults and maintenance based on the area.
-            if (this.AreaSquareMetre > 0)
-            {
-                _faultsAndMaintenancePavementPercent = (value / this.AreaSquareMetre) * 100.0;
-            }
-            else
-            {
-                _faultsAndMaintenancePavementPercent = 0.0;
-            }
-        }
-    }
-
+    public double MaintPavementExtentLast3Years { get; set; }
 
     /// <summary>
-    /// Percentage of Pavement related Faults and Maintenance - calculated on the basis of FaultsAndMaintenancePavementM2 and AreaSquareMetre.
+    /// Pothole maintenance extent over the LAST YEAR, as a percentage of sub-segments with
+    /// maintenance recorded. Historical record from the input data - not modelled forward.
     /// </summary>
-    public double FaultsAndMaintenancePavementPercent
-    {
-        get
-        {
-            return _faultsAndMaintenancePavementPercent;
-        }
-    }
+    public double MaintPotholeExtentLastYear { get; set; }
 
     /// <summary>
-    /// Helper to reset the underlying faults and maintenance values to zero. Use this on itiation if the Surface or Pavement age
-    /// indicates a recent resurfacing or rehabilitation.
+    /// Pothole maintenance extent over the LAST THREE YEARS, as a percentage of sub-segments with
+    /// maintenance recorded. Historical record from the input data - not modelled forward.
     /// </summary>
-    public void ResetFaultsAndMaintenance()
-    {
-        _faultsAndMaintenanceSurfacingM2 = 0.0;
-        _faultsAndMaintenanceSurfacingPercent = 0.0;
-        _faultsAndMaintenancePavementM2 = 0.0;
-        _faultsAndMaintenancePavementPercent = 0.0;
-    }
+    public double MaintPotholeExtentLast3Years { get; set; }
 
+    /// <summary>
+    /// Surfacing maintenance extent over the LAST YEAR, as a percentage of sub-segments with
+    /// maintenance recorded. Historical record from the input data - not modelled forward.
+    /// </summary>
+    public double MaintSurfacingExtentLastYear { get; set; }
+
+    /// <summary>
+    /// Surfacing maintenance extent over the LAST THREE YEARS, as a percentage of sub-segments with
+    /// maintenance recorded. Historical record from the input data - not modelled forward.
+    /// </summary>
+    public double MaintSurfacingExtentLast3Years { get; set; }
 
     #endregion
 
-    #region High Speed Data (HSD) (Rut, Roughness, Texture etc.)
+    #region High Speed Data (HSD) - Rutting, Roughness and Deflection
 
     /// <summary>
-    /// HSD survey date as a string in dd/mm/yyyy format. Do not use this
-    /// after initialitation - use the RutParameterValue property instead.
+    /// Date of the high speed data survey, as an ISO format string 'yyyymmdd'. One survey date now covers
+    /// rutting, roughness, texture and the LCMS visual distresses, because they are collected on the same run.
+    /// Used during initialisation to decide whether the surveyed condition predates the last surfacing or
+    /// rehabilitation. Do not use it after initialisation.
     /// </summary>
-    public string RutSurveyDateString { get; set; } = string.Empty;
+    public string SurveyDateString { get; set; } = string.Empty;
+
+    #region Rutting
 
     /// <summary>
-    /// Roughness segment survey date as string in dd/mm/yyyy format.
+    /// Mean rut depth in mm, exactly as surveyed. Do not use this after initialisation - use the
+    /// RutParameterValue property instead, which carries the modelled value.
     /// </summary>
-    public string RoughnessSurveyDateString { get; set; } = string.Empty;
+    public double RutMeanSurveyed { get; set; }
 
     /// <summary>
-    /// NAASRA 85th percentile roughness.
-    /// </summary>
-    public double Naasra85 { get; set; }
-
-    /// <summary>
-    /// Increment for Naasra in counts per year. This is calculated during initialisation based on the Roughness survey date and the Naasra85 value. After
-    /// the first treatment, the Roughness Increment model is used to estimate the increment each year.
-    /// </summary>
-    public double NaasraIncrement { get; set; }
-
-    /// <summary>
-    /// LWP mean rut 85th percentile from raw input values. Do not use this 
-    /// after initialisation - use the RutParameterValue property instead.
-    /// </summary>
-    public double RutLwpMean85 { get; set; }
-
-    /// <summary>
-    /// RWP mean rut 85th percentile from raw input values.
-    /// </summary>
-    public double RutRwpMean85 { get; set; }
-
-    /// <summary>
-    /// Rut parameter value calculated during initialisation and used to represent the rutting condition of the road segment.     
+    /// Rut depth in mm. This is the modelled rutting condition of the segment: set during initialisation
+    /// from the surveyed value, then advanced each period by the rut increment model.
     /// </summary>
     public double RutParameterValue { get; set; }
 
     /// <summary>
-    /// Rut increment in mm/year. During initialisation, this is calculated based on the RutParameterValue and the HSD survey date. After 
-    /// the first treatment, the rut prediction model is used to estimate the increment.
+    /// Rut increment in mm/year.
     /// </summary>
     public double RutIncrement { get; set; }
 
-    /// <summary>
-    /// Calculates the probability of high rutting based on various parameters such as surface type, urban/rural classification, HCV risk, and distress percentages.
-    /// </summary>    
-    public double GetHighRutProbability()
-    {
-        // logit(-1.6 + 1.1 * para_surf_cs_flag + -0.4 * pcal_is_urban_flag + 0.02 * para_hcv_risk + 0.06 * para_shove_pct + 0.02 * para_mesh_cracks_pct + 0.04 * para_scabb_pct + 0.01 * para_flush_pct)
-        double value = -1.6 + 1.1 * this.SurfaceIsChipSealFlag +
-                            -0.4 * (this.UrbanRural == "u" ? 1 : 0) +
-                            0.02 * this.HCVRisk +
-                            0.06 * this.PctShoving +
-                            0.02 * this.PctMeshCracks +
-                            0.04 * this.PctScabbing +
-                            0.01 * this.PctFlushing;
+    #endregion
 
-        return CalculationUtilities.Logit(value);
-    }
+    #region Roughness (IRI, and Naasra for reporting)
 
     /// <summary>
-    /// Calculates the increment in rutting using an inverse distribution based on the high rut probability. This is done using a JFuncInverseDistribution 
-    /// function. Note that this function should only be called after a first treatment has been applied to the segment. Before any treatment is applied, the
-    /// historical rut rate is used. TODO: Modify this so that the historical rate will only be used for a certain number of years.
+    /// IRI in mm/m, exactly as surveyed. Do not use this after initialisation - use the Iri property
+    /// instead, which carries the modelled value.
     /// </summary>
-    /// <returns>Estimated Rut Increment in mm/year</returns>
-    public double GetRutIncrementAfterTreatment()
-    {
-        // TODO: this setup code contains (a) distribution type; (b) central tendency. Make these lookup values instead
-        // of hardcoding them here.
-        string setupCode = "a : 0.1 : incr_rutting_proba";
-        JFuncInverseDistribution incrementDistribution = new JFuncInverseDistribution(setupCode);
-        Dictionary<string, object> keyValuePairs = new Dictionary<string, object>
-        {
-            { "incr_rutting_proba", this.GetHighRutProbability() }
-        };
-        double increment = Convert.ToDouble(incrementDistribution.Evaluate(keyValuePairs));
-        return increment;
-    }
+    public double IriSurveyed { get; set; }
 
     /// <summary>
-    /// Calculates the probability of high Naasra (rapid deterioration) based on various parameters such as 
-    /// surface type, urban/rural classification, HCV risk, and distress percentages.
-    /// </summary>    
-    public double GetHighNaasraProbability()
-    {
-        //logit(-2.8 + 0.6 * para_surf_cs_flag + 0.5 * pcal_is_urban_flag + 0.03 * para_hcv_risk + 0.02 * para_shove_pct + 0.01 * para_mesh_cracks_pct + 0.03 * para_scabb_pct + 1.67 * para_poth_pct + 0.09 * para_rut)
-        double value = -2.8 + 0.6 * this.SurfaceIsChipSealFlag +
-                            0.5 * (this.UrbanRural == "u" ? 1 : 0) +
-                            0.03 * this.HCVRisk +
-                            0.02 * this.PctShoving +
-                            0.01 * this.PctMeshCracks +
-                            0.03 * this.PctScabbing +
-                            1.67 * this.PctPotholes +
-                            0.09 * this.RutParameterValue;
-        return CalculationUtilities.Logit(value);
-    }
-
-    /// <summary>
-    /// Calculates the increment in Naara  using an inverse distribution based on the high Naasra probability. This is done using a JFuncInverseDistribution 
-    /// function. Note that this function should only be called after a first treatment has been applied to the segment. Before any treatment is applied, the
-    /// historical rate is used. TODO: Modify this so that the historical rate will only be used for a certain number of years.
+    /// IRI in mm/m. This is the modelled roughness condition of the segment and the quantity the model
+    /// actually works in: set during initialisation from the surveyed value, then advanced each period by
+    /// the roughness increment model.
     /// </summary>
-    /// <returns>Estimated Rut Increment in mm/year</returns>
-    public double GetNaasraIncrementAfterTreatment()
+    public double Iri { get; set; }
+
+    /// <summary>
+    /// IRI increment in mm/m per year.
+    /// </summary>
+    public double IriIncrement { get; set; }
+
+    /// <summary>
+    /// Naasra count, converted from IRI. This is a REPORTING value only - nothing in the model deteriorates,
+    /// triggers or resets on it, and there is no separate Naasra state. It is derived from the Iri property
+    /// on every read, so it cannot drift out of step with the roughness the model is actually carrying.
+    /// </summary>
+    public double Naasra
     {
-        // TODO: this setup code contains (a) distribution type; (b) central tendency. Make these lookup values instead
-        // of hardcoding them here.
-        string setupCode = "a : 0.9 : incr_naasra_proba";
-        JFuncInverseDistribution incrementDistribution = new JFuncInverseDistribution(setupCode);
-        Dictionary<string, object> keyValuePairs = new Dictionary<string, object>
-        {
-            { "incr_naasra_proba", this.GetHighNaasraProbability() }
-        };
-        double increment = Convert.ToDouble(incrementDistribution.Evaluate(keyValuePairs));
-        return increment;
+        get { return ConvertIriToNaasra(this.Iri); }
     }
+
+    /// <summary>
+    /// Converts an IRI value (mm/m) to a Naasra count using the relationship NAASRA = 26.49 * IRI - 1.27.
+    /// </summary>
+    /// <param name="iri">IRI value in mm/m</param>
+    /// <returns>Equivalent Naasra count</returns>
+    public static double ConvertIriToNaasra(double iri)
+    {
+        return NaasraPerIri * iri + NaasraIriOffset;
+    }
+
+    /// <summary>
+    /// Converts a Naasra count to an IRI value (mm/m) - the inverse of ConvertIriToNaasra. Needed because
+    /// several lookup sets (roughness reset thresholds and improvement factors) hold their values on the
+    /// Naasra scale, so a reset is applied in Naasra terms and converted back to IRI.
+    /// </summary>
+    /// <param name="naasra">Naasra count</param>
+    /// <returns>Equivalent IRI value in mm/m</returns>
+    public static double ConvertNaasraToIri(double naasra)
+    {
+        return (naasra - NaasraIriOffset) / NaasraPerIri;
+    }
+
+    /// <summary>
+    /// Slope of the IRI to Naasra conversion: NAASRA = 26.49 * IRI - 1.27.
+    /// </summary>
+    private const double NaasraPerIri = 26.49;
+
+    /// <summary>
+    /// Intercept of the IRI to Naasra conversion: NAASRA = 26.49 * IRI - 1.27.
+    /// </summary>
+    private const double NaasraIriOffset = -1.27;
 
     #endregion
 
-    #region Visual Condition Distresses
+    #region Deflection
 
     /// <summary>
-    /// Condition survey date as string in dd/mm/yyyy format.
+    /// Central deflection (D0) in mm, from the 75th percentile Lightweight Deflectometer measurement.
+    /// A static input measure - it is not modelled forward in time.
     /// </summary>
-    public string ConditionSurveyDateString { get; set; } = string.Empty;
+    public double CentralDeflection { get; set; }
+
+    #endregion
+
+    #endregion
+
+    #region Visual Condition Distresses (LCMS)
+
+    // The model carries three visual distresses: cracking, flushing and ravelling. Each is surveyed by the
+    // LCMS on the same run as the high speed data, so the survey date is SurveyDateString above.
+    //
+    // The seven jFunction-era distresses (edge breaks, scabbing, shoving, potholes, and the split between
+    // mesh and longitudinal/transverse cracking) and their S-curve calibration strings have been removed:
+    // the new input data does not carry them separately, and the replacement increment models are specified
+    // against these three.
 
     /// <summary>
-    /// Percentage of flushing.
+    /// Cracking, as a percentage of lane length. A value of 25 means the recorded cracking length equals a
+    /// quarter of the segment's lane length. Can exceed 100 where several cracks run side by side in the
+    /// same stretch.
+    /// </summary>
+    public double PctCracking { get; set; }
+
+    /// <summary>
+    /// Flushing, as a percentage of lane length. Can exceed 100, because the two wheel paths are added
+    /// together: both wheel paths fully flushed reads as 200.
     /// </summary>
     public double PctFlushing { get; set; }
 
     /// <summary>
-    /// Percentage of edge breaks.
+    /// Ravelling, as a percentage of lane length.
     /// </summary>
-    public double PctEdgeBreaks { get; set; }
-
-    /// <summary>
-    /// Percentage of scabbing.
-    /// </summary>
-    public double PctScabbing { get; set; }
-
-    /// <summary>
-    /// Percentage of longitudinal and transverse cracks.
-    /// </summary>
-    public double PctLongTransCracks { get; set; }
-
-    /// <summary>
-    /// Percentage of alligator or mesh cracks.
-    /// </summary>
-    public double PctMeshCracks { get; set; }
-
-    /// <summary>
-    /// Percentage of shoving.
-    /// </summary>
-    public double PctShoving { get; set; }
-
-    /// <summary>
-    /// Percentage of potholes.
-    /// </summary>
-
-    public double PctPotholes { get; set; }
-
-    /// <summary>
-    /// Coded information on the current values for the S-curve model for this distress. Values are stored as:
-    /// [AADI_InitialValue_T100] 
-    /// where: AADI is the Age at Distress Initiation, InitialValue is the percent distress observed right
-    /// after initiation, and T100 is the time it takes for the distress to reach 100% of the segment area.
-    /// </summary>
-    public string FlushingModelInfo { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Coded information on the current values for the S-curve model for this distress. Values are stored as:
-    /// [AADI_InitialValue_T100] 
-    /// where: AADI is the Age at Distress Initiation, InitialValue is the percent distress observed right
-    /// after initiation, and T100 is the time it takes for the distress to reach 100% of the segment area.
-    /// </summary>
-    public string EdgeBreakModelInfo { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Coded information on the current values for the S-curve model for this distress. Values are stored as:
-    /// [AADI_InitialValue_T100] 
-    /// where: AADI is the Age at Distress Initiation, InitialValue is the percent distress observed right
-    /// after initiation, and T100 is the time it takes for the distress to reach 100% of the segment area.
-    /// </summary>
-    public string ScabbingModelInfo { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Coded information on the current values for the S-curve model for this distress. Values are stored as:
-    /// [AADI_InitialValue_T100] 
-    /// where: AADI is the Age at Distress Initiation, InitialValue is the percent distress observed right
-    /// after initiation, and T100 is the time it takes for the distress to reach 100% of the segment area.
-    /// </summary>
-    public string LTCracksModelInfo { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Coded information on the current values for the S-curve model for this distress. Values are stored as:
-    /// [AADI_InitialValue_T100] 
-    /// where: AADI is the Age at Distress Initiation, InitialValue is the percent distress observed right
-    /// after initiation, and T100 is the time it takes for the distress to reach 100% of the segment area.
-    /// </summary>
-    public string MeshCrackModelInfo { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Coded information on the current values for the S-curve model for this distress. Values are stored as:
-    /// [AADI_InitialValue_T100] 
-    /// where: AADI is the Age at Distress Initiation, InitialValue is the percent distress observed right
-    /// after initiation, and T100 is the time it takes for the distress to reach 100% of the segment area.
-    /// </summary>
-    public string ShovingModelInfo { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Coded information on the current values for the S-curve model for this distress. Values are stored as:
-    /// [AADI_InitialValue_T100] 
-    /// where: AADI is the Age at Distress Initiation, InitialValue is the percent distress observed right
-    /// after initiation, and T100 is the time it takes for the distress to reach 100% of the segment area.
-    /// </summary>
-    public string PotholeModelInfo { get; set; } = string.Empty;
+    public double PctRavelling { get; set; }
 
     #endregion
 
@@ -878,7 +745,9 @@ public class RoadSegment
 
     /// <summary>
     /// Treatment count. This should be incremented each time a treatment is applied to the segment. If the count is greater than zero, 
-    /// the IsTreated flag will automatically be set to true. This property also resets the FaultsAndMaintenancePavementM2 and FaultsAndMaintenanceSurfacingM2
+    /// the IsTreated flag will automatically be set to true.
+    /// <para>Note: this no longer clears the maintenance properties. Those are a historical record of work
+    /// already done before the base date, and a treatment applied by the model does not change what happened.</para>
     /// </summary>
     public int TreatmentCount
     {
@@ -890,8 +759,6 @@ public class RoadSegment
             if (_treatmentCount > 0)
             {
                 _isTreated = true;
-                this.FaultsAndMaintenancePavementM2 = 0.0; // Reset pavement faults and maintenance area after treatment
-                this.FaultsAndMaintenanceSurfacingM2 = 0.0; // Reset surfacing faults and maintenance area after treatment
             }
         }
     }
@@ -1087,80 +954,56 @@ public class RoadSegment
     /// <param name="textModParamValues">Return value: Sink holding values for text parameters (to be updated by Domain Model). Keys are parameter names, values are assigned values</param>     
     public void SetParameterValues(Action<string, double> numModParamValues, Action<string, string> textModParamValues)
     {
-        numModParamValues("para_adt", this.AverageDailyTraffic);
-        numModParamValues("para_hcv", this.HeavyVehiclesPerDay);
+        // Every parameter declared on the 'parameters' sheet of domain_model_setup.xlsx must be written here,
+        // and the names must match exactly. A declared parameter that is never given a value is NOT an error:
+        // the framework allocates it and leaves it at zero, so the run completes and the outputs carry a column
+        // of zeros that reads as a result. Keep this list in the same order as the sheet so a gap is visible.
 
-        numModParamValues("para_pave_age", this.PavementAge);
-        numModParamValues("para_pave_remlife", this.PavementRemainingLife);
-        numModParamValues("para_pave_life_ach", this.PavementAchievedLife);
-        numModParamValues("para_hcv_risk", this.HCVRisk);
+        // -- Traffic --
+        numModParamValues("par_adt", this.AverageDailyTraffic);
+        numModParamValues("par_hcv", this.HeavyVehiclesPerDay);
 
-        textModParamValues("para_surf_mat", this.SurfaceMaterial);
-        textModParamValues("para_surf_class", this.SurfaceClass);
-        numModParamValues("para_surf_cs_flag", this.SurfaceIsChipSealFlag);
-        numModParamValues("para_surf_cs_or_ac_flag", this.SurfaceIsChipSealOrACFlag);
-        textModParamValues("para_surf_road_type", this.SurfaceRoadType);
-        numModParamValues("para_surf_thick", this.SurfaceThickness);
-        numModParamValues("para_surf_layers", this.SurfaceNumberOfLayers);
-        textModParamValues("para_surf_func", this.SurfaceFunction);
-        numModParamValues("para_surf_exp_life", this.SurfaceExpectedLife);
-        numModParamValues("para_surf_age", this.SurfaceAge);
-        numModParamValues("para_surf_life_ach", this.SurfaceAchievedLifePercent);
-        numModParamValues("para_surf_remain_life", this.SurfaceRemainingLife);
+        // -- Pavement --
+        numModParamValues("par_pave_age", this.PavementAge);
+        numModParamValues("par_pave_remlife", this.PavementRemainingLife);
+        numModParamValues("par_pave_life_ach", this.PavementAchievedLife);
+        numModParamValues("par_d0", this.CentralDeflection);
+        numModParamValues("par_hcv_risk", this.HCVRisk);
 
-        numModParamValues("para_flush_pct", this.PctFlushing);
-        textModParamValues("para_flush_info", this.FlushingModelInfo);
+        // -- Surfacing --
+        textModParamValues("par_surf_mat", this.SurfaceMaterial);
+        textModParamValues("par_surf_class", this.SurfaceClass);
+        numModParamValues("par_surf_cs_flag", this.SurfaceIsChipSealFlag);
+        numModParamValues("par_surf_cs_or_ac_flag", this.SurfaceIsChipSealOrACFlag);
+        textModParamValues("par_surf_road_type", this.SurfaceRoadType);
+        numModParamValues("par_surf_thick", this.SurfaceThickness);
+        numModParamValues("par_surf_layers", this.SurfaceNumberOfLayers);
+        textModParamValues("par_surf_func", this.SurfaceFunction);
+        numModParamValues("par_surf_exp_life", this.SurfaceExpectedLife);
+        numModParamValues("par_surf_age", this.SurfaceAge);
+        numModParamValues("par_surf_life_ach", this.SurfaceAchievedLifePercent);
+        numModParamValues("par_surf_remain_life", this.SurfaceRemainingLife);
 
-        numModParamValues("para_edgeb_pct", this.PctEdgeBreaks);
-        textModParamValues("para_edgeb_info", this.EdgeBreakModelInfo);
+        // -- Visual distresses --
+        numModParamValues("par_flush_pct", this.PctFlushing);
+        numModParamValues("par_crack_pct", this.PctCracking);
+        numModParamValues("par_ravel_pct", this.PctRavelling);
 
-        numModParamValues("para_scabb_pct", this.PctScabbing);
-        textModParamValues("para_scabb_info", this.ScabbingModelInfo);
+        // -- Rutting --
+        numModParamValues("par_rut_increm", this.RutIncrement);
+        numModParamValues("par_rut", this.RutParameterValue);
 
-        numModParamValues("para_lt_cracks_pct", this.PctLongTransCracks);
-        textModParamValues("para_lt_cracks_info", this.LTCracksModelInfo);
+        // -- Roughness. par_naasra is derived from par_iri and is carried for reporting only --
+        numModParamValues("par_iri_increm", this.IriIncrement);
+        numModParamValues("par_iri", this.Iri);
+        numModParamValues("par_naasra", this.Naasra);
 
-        numModParamValues("para_mesh_cracks_pct", this.PctMeshCracks);
-        textModParamValues("para_mesh_cracks_info", this.MeshCrackModelInfo);
-
-        numModParamValues("para_shove_pct", this.PctShoving);
-        textModParamValues("para_shove_info", this.ShovingModelInfo);
-
-        numModParamValues("para_poth_pct", this.PctPotholes);
-        textModParamValues("para_poth_info", this.PotholeModelInfo);
-
-        numModParamValues("para_rut_increm", this.RutIncrement);
-        numModParamValues("para_rut", this.RutParameterValue);
-
-        numModParamValues("para_naasra_increm", this.NaasraIncrement);
-        numModParamValues("para_naasra", this.Naasra85);
-
-        numModParamValues("para_sdi", this.SurfaceDistressIndex);
-        numModParamValues("para_pdi", this.PavementDistressIndex);
-
-        numModParamValues("para_obj_distress", this.ObjectiveDistress);
-        numModParamValues("para_obj_rsl", this.ObjectiveRemainingSurfaceLife);
-        numModParamValues("para_obj_rutting", this.ObjectiveRutting);
-        numModParamValues("para_obj_naasra", this._objectiveNaasra); 
-        numModParamValues("para_obj_o", this.ObjectiveValueRaw);
-        numModParamValues("para_obj", this.ObjectiveValue);
-        numModParamValues("para_obj_auc", this.ObjectiveAreaUnderCurve);
-
-        numModParamValues("para_maint_cost_perkm", this.MaintenanceCostPerKm);
-
-        textModParamValues("para_csl_status", this.CandidateSelectionOutcome);
-        numModParamValues("para_csl_flag", this.IsCandidateForTreatment);
-
-        numModParamValues("para_is_treated_flag", Convert.ToDouble(this.IsTreated)); // Defaults to false initially
-        numModParamValues("para_treat_count", this.TreatmentCount); // Defaults to 0 initially
-
-        // The following are Network Parameters - to be set automatically by the framework model:
-        //para_pdi_rank
-        //para_rut_rank
-        //para_sdi_rank
-        //para_sla_rank
+        // -- Candidate selection and treatment history --
+        textModParamValues("par_csl_status", this.CandidateSelectionOutcome);
+        numModParamValues("par_csl_flag", this.IsCandidateForTreatment);
+        numModParamValues("par_is_treated_flag", Convert.ToDouble(this.IsTreated));
+        numModParamValues("par_treat_count", this.TreatmentCount);
     }
-
     #endregion
 
 }
