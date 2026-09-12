@@ -399,3 +399,6 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+
+# Fritz's own working note. Local to Lonrix - it is not part of what a client clones.
+ab-next-session.md
