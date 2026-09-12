@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!--
+      DELIBERATELY NOT SET: <AssemblyName>.
+      Leaving it unset makes the assembly name default to the .csproj file stem, which is what
+      keeps the four names aligned. See the four-name rule before you rename anything here.
+    -->
+  </PropertyGroup>
+
+  <!--
+    Framework references come from the sibling refs\ folder, NOT from <ProjectReference>.
+
+    The wildcard is deliberate: the web Debug Model workspace stages its own, larger set of
+    framework assemblies into refs\ before it builds, so this exact csproj builds unchanged
+    both on your machine and in the debug sidecar.
+
+    Private=false means "do not copy these into bin\". At run time the framework host has
+    already loaded its own copy of every one of these assemblies. Your bin\ folder should
+    contain StarterModel.dll and StarterModel.pdb, nothing else.
+  -->
+  <ItemGroup>
+    <Reference Include="refs\*.dll">
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>
