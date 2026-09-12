@@ -21,7 +21,7 @@
 
     Private=false means "do not copy these into bin\". At run time the framework host has
     already loaded its own copy of every one of these assemblies. Your bin\ folder should
-    contain StarterModel.dll and StarterModel.pdb, nothing else.
+    contain StarterModel.dll, StarterModel.pdb and StarterModel.deps.json, and no JCass_*.dll.
   -->
   <ItemGroup>
     <Reference Include="refs\*.dll">
