@@ -1,4 +1,4 @@
-namespace StarterModel.Objects;
+﻿namespace StarterModel.Objects;
 
 /// <summary>
 /// Standard normal distribution function and its inverse.
@@ -75,8 +75,11 @@ public static class NormalDistribution
 
     /// <summary>
     /// Complementary error function, erfc(x) = 1 - erf(x), by the Numerical Recipes Chebyshev fit.
-    /// Relative error is below 1.2e-7 across the whole range, which is well inside what the
-    /// deterioration models need.
+    /// <para>Measured relative error against a reference erfc is below 5e-15 over z in [-6, 6], which
+    /// is full double precision for this purpose. Do not confuse this with the 1.2e-7 figure quoted
+    /// for the older seven-term Numerical Recipes approximation - that is a different routine, and
+    /// this accuracy is what lets PhiInverse round-trip a probability to about 5e-15 and so lets the
+    /// truncated cracking distributions be sampled exactly by inverse CDF.</para>
     /// </summary>
     private static double Erfc(double x)
     {
