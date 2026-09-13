@@ -12,9 +12,20 @@ public class StarterModel : DomainModelBase
     private Resetter _resetter { get; set; } = null!;
     private Incrementer _incrementer { get; set; } = null!;
 
-    // STAGE 2 (Incrementer): the seven jFunction-era S-curve distress models that used to be held here have
-    // been removed along with the distresses they modelled. The replacement increment models for rutting,
-    // roughness, cracking, flushing and ravelling are still to be specified, and will be set up here.
+    /// <summary>
+    /// The fitted coefficients behind the deterioration models, loaded once from the client's
+    /// 'supporting' folder. Held so that a refit is a file swap rather than a rebuild.
+    /// </summary>
+    public DeteriorationCoefficients DeteriorationCoefficients { get; set; } = null!;
+
+    /// <summary>
+    /// The five deterioration models - cracking, rutting, roughness, flushing and ravelling. These
+    /// replaced the seven jFunction-era S-curve distress models that used to be held here.
+    /// <para>Rutting, roughness and cracking are LEVEL models: each recomputes the condition from the
+    /// segment's surface age and its own persistent draws, rather than adding a rate to last period's
+    /// value. Flushing and ravelling are rule-based and carry no fitted coefficients at all.</para>
+    /// </summary>
+    public DeteriorationModels DeteriorationModels { get; set; } = null!;
 
     public Dictionary<string, TreatmentStrategy> CandidateStrategies = null!;
 
@@ -36,6 +47,12 @@ public class StarterModel : DomainModelBase
             _resetter = new Resetter(this.model, this);
             _incrementer = new Incrementer(this.model, this);
             this.Constants = new Constants(this.model.Lookups);
+
+            // SetupInstance is the earliest point the lookups and the work folder are available, and
+            // both are needed here. Building the models once matters: loading ten coefficient files
+            // per element per period would dominate the run.
+            this.DeteriorationCoefficients = new DeteriorationCoefficients(this.model);
+            this.DeteriorationModels = new DeteriorationModels(this.DeteriorationCoefficients, this.Constants);
 
         }
         catch (Exception ex)
@@ -100,7 +117,7 @@ public class StarterModel : DomainModelBase
         {
             Dictionary<string, object> infoFromModel = model.GetSpecialPlaceholderValues(iElemIndex, iPeriod, treatment);
 
-            RoadSegment segment = RoadSegmentFactory.GetFromModel(this.model, numInputs, textInputs, currentNumModParamValues, currentTextModParamValues, iElemIndex, iPeriod);
+            RoadSegment segment = RoadSegmentFactory.GetFromModel(this.model, this, numInputs, textInputs, currentNumModParamValues, currentTextModParamValues, iElemIndex, iPeriod);
                        
 
             // Apply Resets
@@ -136,7 +153,7 @@ public class StarterModel : DomainModelBase
         {
             Dictionary<string, object> infoFromModel = model.GetSpecialPlaceholderValues(iElemIndex, iPeriod, null);
 
-            RoadSegment segment = RoadSegmentFactory.GetFromModel(this.model, numInputs, textInputs, currentNumModParamValues, currentTextModParamValues, iElemIndex, iPeriod);
+            RoadSegment segment = RoadSegmentFactory.GetFromModel(this.model, this, numInputs, textInputs, currentNumModParamValues, currentTextModParamValues, iElemIndex, iPeriod);
             
             // Apply increments here
             RoadSegment incrementedSegment = _incrementer.Increment(segment, iPeriod);
@@ -174,7 +191,7 @@ public class StarterModel : DomainModelBase
         {
             Dictionary<string, object> infoFromModel = model.GetSpecialPlaceholderValues(iElemIndex, iPeriod, null);
 
-            RoadSegment segment = RoadSegmentFactory.GetFromModel(this.model, numInputs, textInputs, numModParamValues, textModParamValues, iElemIndex, iPeriod);            
+            RoadSegment segment = RoadSegmentFactory.GetFromModel(this.model, this, numInputs, textInputs, numModParamValues, textModParamValues, iElemIndex, iPeriod);            
             
             TreatmentsTrigger mcdaTriggerFunction = new TreatmentsTrigger(this.model, this);
             List<TreatmentInstance> candidates = mcdaTriggerFunction.GetTriggeredTreatments(segment, iPeriod, infoFromModel);
@@ -207,7 +224,7 @@ public class StarterModel : DomainModelBase
         try
         {
             Dictionary<string, object> infoFromModel = model.GetSpecialPlaceholderValues(iElemIndex, iPeriod, null);
-            RoadSegment segment = RoadSegmentFactory.GetFromModel(this.model, numInputs, textInputs, numModParamValues, textModParamValues, iElemIndex, iPeriod);
+            RoadSegment segment = RoadSegmentFactory.GetFromModel(this.model, this, numInputs, textInputs, numModParamValues, textModParamValues, iElemIndex, iPeriod);
             segment.UpdateFormulaValues(this.model, this, iPeriod, infoFromModel);  //Immediately update the formula values for the segment
 
             return RoutineMaintenance.GetRoutineMaintenance(segment, iPeriod, model.Lookups);

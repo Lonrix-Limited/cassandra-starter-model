@@ -17,8 +17,10 @@ public static class RoadSegmentFactory
     /// network data as loaded and knows nothing about model parameters.
     /// </summary>
     /// <param name="model">Framework model, used to read the raw input data and the lookup sets</param>
+    /// <param name="domainModel">Domain model, used for its Constants - in particular the surface
+    /// class to deterioration group mapping</param>
     /// <param name="elementIndex">Zero-based index of the element</param>
-    public static RoadSegment GetFromRawData(ModelBase model, int elementIndex)
+    public static RoadSegment GetFromRawData(ModelBase model, StarterModel domainModel, int elementIndex)
     {
         RoadSegment segment = new RoadSegment();
 
@@ -54,13 +56,16 @@ public static class RoadSegmentFactory
         // files carry client-variant values for it.
         segment.RoadClass = model.GetLookupValueText("road_class", segment.ONRC);
 
-        // Traffic
+        // Traffic. The same column seeds both the modelled ADT, which grows each period, and the
+        // surveyed ADT, which the deterioration models hold frozen at the measured value.
         segment.AverageDailyTraffic = model.GetInputDataNumber(elementIndex, "inp_adt");
+        segment.SurveyedAverageDailyTraffic = segment.AverageDailyTraffic;
         segment.HeavyVehiclePercentage = model.GetInputDataNumber(elementIndex, "inp_heavy_perc");
         segment.TrafficGrowthPercent = model.GetInputDataNumber(elementIndex, "inp_traff_growth_perc");
 
         // Surfacing
         segment.SurfaceClass = model.GetInputDataText(elementIndex, "inp_surf_class");
+        segment.DeteriorationGroup = domainModel.Constants.GetDeteriorationGroup(segment.SurfaceClass);
         segment.NextSurface = model.GetInputDataText(elementIndex, "inp_next_surf");
         segment.SurfacingDateString = model.GetInputDataText(elementIndex, "inp_surf_date");
         segment.SurfaceFunction = model.GetInputDataText(elementIndex, "inp_surf_function");
@@ -76,13 +81,15 @@ public static class RoadSegmentFactory
         segment.CentralDeflection = model.GetInputDataNumber(elementIndex, "inp_lmd_d0_75th");
 
         // High speed data. One survey date covers rutting, roughness and the LCMS visual distresses.
-        // The rates are the client's own estimates of the current deterioration rate, based on the observed
-        // value and the surface age with a presumed bedding-in value.
+        //
+        // NOTE: inp_rut_rate and inp_iri_rate are deliberately NOT read. They are arithmetic rather
+        // than measurement - each is the observed level minus an assumed as-new baseline, divided by
+        // the surface age - so they carry nothing the level and the age do not already carry. The
+        // replacement deterioration models recompute the level from age directly, and a rate column
+        // has no part in them.
         segment.SurveyDateString = model.GetInputDataText(elementIndex, "inp_hsd_survey_date");
         segment.RutMeanSurveyed = model.GetInputDataNumber(elementIndex, "inp_rut_mean");
-        segment.RutIncrement = model.GetInputDataNumber(elementIndex, "inp_rut_rate");
         segment.IriSurveyed = model.GetInputDataNumber(elementIndex, "inp_iri_mean");
-        segment.IriIncrement = model.GetInputDataNumber(elementIndex, "inp_iri_rate");
 
         // Visual distresses, from the LCMS survey
         segment.PctCracking = model.GetInputDataNumber(elementIndex, "inp_pct_cracks");
@@ -107,13 +114,16 @@ public static class RoadSegmentFactory
     /// read from the raw input, exactly as GetFromRawData reads it.</para>
     /// </summary>
     /// <param name="frameworkModel">Framework model, used for the lookup sets</param>
+    /// <param name="domainModel">Domain model, used for its Constants - in particular the surface
+    /// class to deterioration group mapping</param>
     /// <param name="numInputValues">Raw numeric input values for the element, keyed by column name</param>
     /// <param name="textInputValues">Raw text input values for the element, keyed by column name</param>
     /// <param name="numParamValues">Current values for numeric model parameters, keyed by parameter name</param>
     /// <param name="textParamValues">Current values for text model parameters, keyed by parameter name</param>
     /// <param name="elementIndex">Zero-based index of the element</param>
     /// <param name="iPeriod">Modelling period (1, 2, ... n)</param>
-    public static RoadSegment GetFromModel(ModelBase frameworkModel, Dictionary<string, double> numInputValues, Dictionary<string, string> textInputValues,
+    public static RoadSegment GetFromModel(ModelBase frameworkModel, StarterModel domainModel,
+        Dictionary<string, double> numInputValues, Dictionary<string, string> textInputValues,
         Dictionary<string, double> numParamValues, Dictionary<string, string> textParamValues, int elementIndex, int iPeriod)
     {
         RoadSegment segment = new RoadSegment();
@@ -152,7 +162,11 @@ public static class RoadSegmentFactory
         segment.ONRC = textInputValues["inp_onrc"];
         segment.RoadClass = frameworkModel.GetLookupValueText("road_class", segment.ONRC);
 
-        // Traffic. ADT itself is a parameter (it grows each period) and is read below.
+        // Traffic. The modelled ADT is a parameter (it grows each period) and is read below. The
+        // SURVEYED ADT comes from the raw input every period, which is exactly what makes it frozen:
+        // it is the measurement, and the deterioration models must be evaluated on it rather than on
+        // the grown value. See the RoadSegment property for what goes wrong otherwise.
+        segment.SurveyedAverageDailyTraffic = numInputValues["inp_adt"];
         segment.HeavyVehiclePercentage = numInputValues["inp_heavy_perc"];
         segment.TrafficGrowthPercent = numInputValues["inp_traff_growth_perc"];
 
@@ -194,6 +208,7 @@ public static class RoadSegmentFactory
 
         segment.SurfaceMaterial = textParamValues["par_surf_mat"];
         segment.SurfaceClass = textParamValues["par_surf_class"];
+        segment.DeteriorationGroup = domainModel.Constants.GetDeteriorationGroup(segment.SurfaceClass);
         // par_surf_cs_flag, par_surf_cs_or_ac_flag and par_surf_road_type are derived - do not assign them
         segment.SurfaceThickness = numParamValues["par_surf_thick"];
         segment.SurfaceNumberOfLayers = numParamValues["par_surf_layers"];
@@ -216,6 +231,18 @@ public static class RoadSegmentFactory
         // Treatment history. Setting the count also sets the IsTreated flag, so par_is_treated_flag is
         // derived and must not be assigned.
         segment.TreatmentCount = Convert.ToInt32(numParamValues["par_treat_count"]);
+
+        // Deterioration model state. These are the draws made once at initialisation and carried for
+        // the life of the surfacing. Miss one of these reads and the framework hands back zero: every
+        // segment becomes exactly average, the run completes, and nothing says so.
+        segment.RutDeviate = numParamValues["par_rut_z"];
+        segment.IriDeviate = numParamValues["par_iri_z"];
+        segment.CrackOnsetPosition = numParamValues["par_crack_u_onset"];
+        segment.CrackSeverityQuantile = numParamValues["par_crack_w_sev"];
+        segment.CrackingBelowOnset = numParamValues["par_crack_below"];
+        segment.CrackingInitSource = Convert.ToInt32(numParamValues["par_crack_init_src"]);
+        segment.RutInitSource = Convert.ToInt32(numParamValues["par_rut_init_src"]);
+        segment.IriInitSource = Convert.ToInt32(numParamValues["par_iri_init_src"]);
 
         // STAGE 4 (treatments trigger): par_csl_status and par_csl_flag carry the candidate selection
         // outcome from the previous period and are not read back yet. Neither are the PDI, SDI, objective

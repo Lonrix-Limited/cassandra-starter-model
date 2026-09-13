@@ -44,6 +44,25 @@ public class Constants
     private double _maxSlaForACHeavyMaint;
     private int _minPeriodsBetweenACHeavyMaint;
 
+    // Related to the deterioration models
+    private double _detAgeOffset;
+    private double _detAgeCapYears;
+    private double _detCrackOnsetPercent;
+    private double _detRutChipSealGrowthPerYear;
+    private double _detMultiplierClampSd;
+
+    private double _detFeedbackCrackOnRut;
+    private double _detFeedbackCrackOnIri;
+    private double _detFeedbackRutOnIri;
+
+    private double _ruleOnsetLifeFraction;
+    private double _ruleSurfaceLifeDefaultYears;
+    private double _ruleFlushingRatePerYear;
+    private double _ruleRavellingRatePerYear;
+    private double _ruleTrafficFactor;
+
+    private Dictionary<string, object> _surfaceClassGroups = new Dictionary<string, object>();
+
 
     /// <summary>
     /// Base date for the model run. Maps to lookup set "gernal" and setting key "base_date".
@@ -250,8 +269,145 @@ public class Constants
         get { return _minPeriodsBetweenACHeavyMaint; }
     }
 
+    #region Deterioration model constants
+
+    // These are the single tunable numbers behind the deterioration models. The FITTED coefficients
+    // that go with them are a different kind of thing - regenerated as a whole set by a refit - and
+    // live in CSV files in the client's 'supporting' folder, loaded by DeteriorationCoefficients.
+
+    /// <summary>
+    /// Years added to surface age inside every log(age) term. Comes from the regression fit, so
+    /// changing it invalidates the coefficients rather than recalibrating them.
+    /// </summary>
+    public double DetAgeOffset { get { return _detAgeOffset; } }
+
+    /// <summary>
+    /// Surface age is capped at this value inside every log(age) term. Beyond it the fit has too
+    /// little data to stand on, and an untreated segment would be extrapolated far outside the evidence.
+    /// </summary>
+    public double DetAgeCapYears { get { return _detAgeCapYears; } }
+
+    /// <summary>
+    /// Cracking percentage marking the onset regime change. Below it a segment shows no age trend.
+    /// </summary>
+    public double DetCrackOnsetPercent { get { return _detCrackOnsetPercent; } }
+
+    /// <summary>
+    /// JUDGEMENT, not fitted. Rut growth in mm added to chipseal for each year since surfacing,
+    /// because surface age is not the rut clock for chipseal. Report it as judgement wherever it appears.
+    /// </summary>
+    public double DetRutChipSealGrowthPerYear { get { return _detRutChipSealGrowthPerYear; } }
+
+    /// <summary>
+    /// Each segment's persistent deviate is clamped to plus or minus this many standard deviations,
+    /// so a single extreme reading cannot lock a segment into fast deterioration for the whole run.
+    /// </summary>
+    public double DetMultiplierClampSd { get { return _detMultiplierClampSd; } }
+
+    /// <summary>Effect of cracking on rutting. Deliberately not fitted; zero means off.</summary>
+    public double DetFeedbackCrackOnRut { get { return _detFeedbackCrackOnRut; } }
+
+    /// <summary>Effect of cracking on roughness. Deliberately not fitted; zero means off.</summary>
+    public double DetFeedbackCrackOnIri { get { return _detFeedbackCrackOnIri; } }
+
+    /// <summary>Effect of rutting on roughness. Deliberately not fitted; zero means off.</summary>
+    public double DetFeedbackRutOnIri { get { return _detFeedbackRutOnIri; } }
+
+    /// <summary>
+    /// Fraction of the surface expected life at which flushing and ravelling begin. Judgement.
+    /// </summary>
+    public double RuleOnsetLifeFraction { get { return _ruleOnsetLifeFraction; } }
+
+    /// <summary>
+    /// Surface expected life used where the input value is zero, so that a missing life does not put
+    /// the onset age at zero and start a new surface distressed.
+    /// </summary>
+    public double RuleSurfaceLifeDefaultYears { get { return _ruleSurfaceLifeDefaultYears; } }
+
+    /// <summary>Flushing percentage added per year once onset is reached. Judgement, not fitted.</summary>
+    public double RuleFlushingRatePerYear { get { return _ruleFlushingRatePerYear; } }
+
+    /// <summary>Ravelling percentage added per year once onset is reached. Judgement, not fitted.</summary>
+    public double RuleRavellingRatePerYear { get { return _ruleRavellingRatePerYear; } }
+
+    /// <summary>
+    /// Multiplier on the flushing and ravelling growth rate. 1.0 is neutral; a traffic-dependent
+    /// adjustment is expected to replace it.
+    /// </summary>
+    public double RuleTrafficFactor { get { return _ruleTrafficFactor; } }
+
+    /// <summary>
+    /// Maps a surface class onto one of the two groups the deterioration models were fitted on.
+    /// <para>The set is kept whole rather than unpacked into properties, so that a new surface class
+    /// needs a row in lookups.xlsx and nothing in C#. Anything not named in the set falls back to the
+    /// 'default' key, which is how blocks, concrete and other surfaces are placed.</para>
+    /// </summary>
+    /// <param name="surfaceClass">Surface class of the segment, lower case</param>
+    public string GetDeteriorationGroup(string surfaceClass)
+    {
+        string key = surfaceClass ?? string.Empty;
+        if (_surfaceClassGroups.ContainsKey(key))
+        {
+            return Convert.ToString(_surfaceClassGroups[key])!.Trim().ToLower();
+        }
+
+        if (!_surfaceClassGroups.ContainsKey(DefaultKey))
+        {
+            throw new Exception($"Lookup set '{SurfaceClassGroupSet}' in lookups.xlsx has no entry for surface " +
+                                $"class '{surfaceClass}' and no '{DefaultKey}' key to fall back on. Add one or " +
+                                $"the other: without it, a surface class nobody anticipated stops the run.");
+        }
+
+        return Convert.ToString(_surfaceClassGroups[DefaultKey])!.Trim().ToLower();
+    }
+
+    #endregion
+
+    #region Guarded lookup readers
+
+    private const string DeteriorationSet = "deterioration";
+    private const string FeedbackSet = "deterioration_feedback";
+    private const string RuleDistressSet = "rule_distress";
+    private const string SurfaceClassGroupSet = "surf_class_group";
+    private const string DefaultKey = "default";
+
+    /// <summary>
+    /// Reads one numeric lookup value, naming the set and the key if it is absent. Without the guard a
+    /// spreadsheet typo surfaces as a KeyNotFoundException naming nothing at all.
+    /// </summary>
+    private static double GetNumber(Dictionary<string, Dictionary<string, object>> lookupSets, string setName, string key)
+    {
+        if (!lookupSets.ContainsKey(setName))
+        {
+            throw new Exception($"Lookup set '{setName}' is not in lookups.xlsx. The deterioration models " +
+                                $"cannot start without it.");
+        }
+        if (!lookupSets[setName].ContainsKey(key))
+        {
+            throw new Exception($"'{key}' has no value in lookup set '{setName}' in lookups.xlsx.");
+        }
+
+        // Convert, never cast: setting_value arrives as text whatever the cell looks like in Excel, and
+        // a cast throws an InvalidCastException that mentions nothing about spreadsheets.
+        return Convert.ToDouble(lookupSets[setName][key]);
+    }
+
+    /// <summary>
+    /// Returns a whole lookup set, naming it if it is absent.
+    /// </summary>
+    private static Dictionary<string, object> GetSet(Dictionary<string, Dictionary<string, object>> lookupSets, string setName)
+    {
+        if (!lookupSets.ContainsKey(setName))
+        {
+            throw new Exception($"Lookup set '{setName}' is not in lookups.xlsx.");
+        }
+        return lookupSets[setName];
+    }
+
+    #endregion
+
     public Constants(Dictionary<string, Dictionary<string, object>> lookupSets)
-    {        
+    {
         _baseDate = JCass_Core.Utils.HelperMethods.ParseISODateNoTime(lookupSets["general"]["base_date"].ToString()!);
         _shortTermPeriod = Convert.ToInt32(lookupSets["general"]["short_term_periods"]);
 
@@ -287,7 +443,28 @@ public class Constants
         // Related to MCDA Treatment Triggering
         _maxSlaForACHeavyMaint = Convert.ToDouble(lookupSets["mcda_treatment_triggering"]["ac_hmaint_maximum_sla"]);
         _minPeriodsBetweenACHeavyMaint = Convert.ToInt32(lookupSets["mcda_treatment_triggering"]["ac_hmaint_min_periods_between"]);
-                
+
+        // Related to the deterioration models. Each of these is read through a guard that names the set
+        // and the key, so that a spreadsheet typo is a message a modeller can act on, reported at setup
+        // before a single period is modelled.
+        _detAgeOffset = GetNumber(lookupSets, DeteriorationSet, "age_offset");
+        _detAgeCapYears = GetNumber(lookupSets, DeteriorationSet, "age_cap_years");
+        _detCrackOnsetPercent = GetNumber(lookupSets, DeteriorationSet, "crack_onset_pct");
+        _detRutChipSealGrowthPerYear = GetNumber(lookupSets, DeteriorationSet, "rut_cs_growth_mm_per_year");
+        _detMultiplierClampSd = GetNumber(lookupSets, DeteriorationSet, "multiplier_clamp_sd");
+
+        _detFeedbackCrackOnRut = GetNumber(lookupSets, FeedbackSet, "crack_on_rut");
+        _detFeedbackCrackOnIri = GetNumber(lookupSets, FeedbackSet, "crack_on_iri");
+        _detFeedbackRutOnIri = GetNumber(lookupSets, FeedbackSet, "rut_on_iri");
+
+        _ruleOnsetLifeFraction = GetNumber(lookupSets, RuleDistressSet, "onset_life_fraction");
+        _ruleSurfaceLifeDefaultYears = GetNumber(lookupSets, RuleDistressSet, "surf_life_default_years");
+        _ruleFlushingRatePerYear = GetNumber(lookupSets, RuleDistressSet, "rate_flushing_pct_per_year");
+        _ruleRavellingRatePerYear = GetNumber(lookupSets, RuleDistressSet, "rate_ravelling_pct_per_year");
+        _ruleTrafficFactor = GetNumber(lookupSets, RuleDistressSet, "traffic_factor");
+
+        _surfaceClassGroups = GetSet(lookupSets, SurfaceClassGroupSet);
+
     }
 
 

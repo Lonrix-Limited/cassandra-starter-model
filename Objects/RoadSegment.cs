@@ -394,9 +394,24 @@ public class RoadSegment
     #region Traffic and Growth
 
     /// <summary>
-    /// Average daily traffic.
+    /// Average daily traffic. This is the MODELLED value: it grows each period by the traffic growth
+    /// percentage, and it is what the treatment trigger and the reporting use.
+    /// <para>The deterioration models do NOT read it - they read SurveyedAverageDailyTraffic below.</para>
     /// </summary>
     public double AverageDailyTraffic { get; set; }
+
+    /// <summary>
+    /// Average daily traffic exactly as surveyed, held at its measured value for the whole run. Maps
+    /// to input column "inp_adt".
+    /// <para>This exists because the deterioration models must be evaluated on frozen traffic. In the
+    /// roughness models the traffic coefficient is NEGATIVE - busier roads on this network were built
+    /// and maintained to a higher standard - so feeding growing traffic to them predicts roads getting
+    /// smoother as they get busier. Measured on this network: with traffic growing at 2% a year, 95%
+    /// of chipseal segments come out smoother in thirty years than they are today, and network median
+    /// roughness falls. Freezing costs almost nothing anywhere else, because thirty years of growth is
+    /// worth about 2% of the age effect on rutting and 1% on cracking.</para>
+    /// </summary>
+    public double SurveyedAverageDailyTraffic { get; set; }
 
     /// <summary>
     /// Heavy vehicle percentage.
@@ -605,6 +620,97 @@ public class RoadSegment
     /// Ravelling, as a percentage of lane length.
     /// </summary>
     public double PctRavelling { get; set; }
+
+    #endregion
+
+    #region Deterioration model state
+
+    // WHY THIS REGION EXISTS. The deterioration models are LEVEL models, not increments: the value for
+    // a year is recomputed from the segment's surface age rather than added to last year's value. What
+    // makes one segment differ from another of the same age, surface and traffic is a random draw made
+    // ONCE and then held for the life of the surfacing - the spread between otherwise identical
+    // segments is the phenomenon itself, not error around a curve, so annual noise will not do.
+    //
+    // Every property here is therefore a model PARAMETER: it has to survive from one period to the
+    // next. If any one of them stopped being written or read back, the framework would leave it at
+    // zero, every segment would become exactly average, and nothing would report it.
+
+    /// <summary>
+    /// Which of the two fitted model groups this segment belongs to - "ac" or "cs". Resolved from the
+    /// surface class through the 'surf_class_group' lookup set, which is also where blocks, concrete
+    /// and other surfaces get placed. Set by the factory; not a parameter, because it follows from the
+    /// surface class.
+    /// </summary>
+    public string DeteriorationGroup { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The segment's persistent rutting deviate, drawn once and clamped to the configured number of
+    /// standard deviations. The rut level is scaled by exp(sigma * this).
+    /// <para>The clamp lives in the deterioration models, from the 'multiplier_clamp_sd' lookup. The
+    /// parameter is declared wider than that on purpose: a declared range equal to a tunable bound
+    /// would mean raising the lookup got silently truncated by the framework instead.</para>
+    /// </summary>
+    public double RutDeviate { get; set; }
+
+    /// <summary>
+    /// The segment's persistent roughness deviate, drawn once and clamped. The IRI level is scaled by
+    /// exp(sigma * this).
+    /// </summary>
+    public double IriDeviate { get; set; }
+
+    /// <summary>
+    /// The segment's position in the cracking onset order, between 0 and 1. The segment has cracked in
+    /// any year where this sits below the modelled onset probability for its current surface age.
+    /// <para>Deliberately compared afresh each year rather than latched into a flag. The comparison is
+    /// already one-way within a surfacing cycle, because the onset probability only rises with age,
+    /// and leaving it stateless is what makes a resurfacing work with no special case at all.</para>
+    /// </summary>
+    public double CrackOnsetPosition { get; set; }
+
+    /// <summary>
+    /// The segment's quantile within the cracking severity distribution, between 0 and 1, used once it
+    /// has cracked. Not interchangeable with a normal deviate: it indexes a LEFT-TRUNCATED
+    /// distribution, and a raw normal in its place would put sub-threshold cracking on segments that
+    /// have already cracked.
+    /// </summary>
+    public double CrackSeverityQuantile { get; set; }
+
+    /// <summary>
+    /// Cracking percentage carried in any year the segment has not cracked. Held rather than redrawn,
+    /// because that group shows no age trend and redrawing it annually would invent variation the data
+    /// does not support. Below the onset threshold by construction.
+    /// </summary>
+    public double CrackingBelowOnset { get; set; }
+
+    /// <summary>
+    /// How year-zero cracking was set: 0 surveyed and reproduced exactly, 1 surveyed but the deviate
+    /// was clamped, 2 not surveyed so the segment was inferred from the model.
+    /// <para>Reporting must be able to say how much of the network was measured and how much inferred.
+    /// Nearly 30% of segments carry no cracking survey, which is far too much to leave silent.</para>
+    /// </summary>
+    public int CrackingInitSource { get; set; }
+
+    /// <summary>
+    /// How year-zero rutting was set: 0 surveyed and reproduced exactly, 1 surveyed but clamped. Every
+    /// segment has a rut reading, so "inferred" does not arise.
+    /// </summary>
+    public int RutInitSource { get; set; }
+
+    /// <summary>
+    /// How year-zero roughness was set: 0 surveyed and reproduced exactly, 1 surveyed but clamped.
+    /// Missing roughness is imputed before the run to a plausible value, so it cannot be detected here
+    /// and "inferred" does not arise.
+    /// </summary>
+    public int IriInitSource { get; set; }
+
+    /// <summary>Value of CrackingInitSource, RutInitSource or IriInitSource for a surveyed segment.</summary>
+    public const int InitSourceSurveyed = 0;
+
+    /// <summary>Value of the init-source properties for a surveyed segment whose deviate was clamped.</summary>
+    public const int InitSourceClamped = 1;
+
+    /// <summary>Value of the init-source properties for a segment with no usable survey.</summary>
+    public const int InitSourceInferred = 2;
 
     #endregion
 
@@ -1004,6 +1110,17 @@ public class RoadSegment
         numModParamValues("par_csl_flag", this.IsCandidateForTreatment);
         numModParamValues("par_is_treated_flag", Convert.ToDouble(this.IsTreated));
         numModParamValues("par_treat_count", this.TreatmentCount);
+
+        // -- Deterioration model state. Drawn once per segment and carried for the life of the
+        //    surfacing; see the 'Deterioration model state' region for why these must persist --
+        numModParamValues("par_rut_z", this.RutDeviate);
+        numModParamValues("par_iri_z", this.IriDeviate);
+        numModParamValues("par_crack_u_onset", this.CrackOnsetPosition);
+        numModParamValues("par_crack_w_sev", this.CrackSeverityQuantile);
+        numModParamValues("par_crack_below", this.CrackingBelowOnset);
+        numModParamValues("par_crack_init_src", this.CrackingInitSource);
+        numModParamValues("par_rut_init_src", this.RutInitSource);
+        numModParamValues("par_iri_init_src", this.IriInitSource);
     }
     #endregion
 
