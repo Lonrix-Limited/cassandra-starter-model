@@ -61,7 +61,19 @@ public class Constants
     private double _ruleRavellingRatePerYear;
     private double _ruleTrafficFactor;
 
+    private double _rehabResetCrackingPercent;
+    private double _rehabResetRutMillimetres;
+    private double _rehabResetIri;
+
     private Dictionary<string, object> _surfaceClassGroups = new Dictionary<string, object>();
+
+    // Group-keyed deterioration numbers, unpacked once at setup so that a missing key stops the run
+    // there rather than part way through a period.
+    private Dictionary<string, double> _rehabResetDeflection = new Dictionary<string, double>();
+    private Dictionary<string, double> _rehabOffsetRut = new Dictionary<string, double>();
+    private Dictionary<string, double> _rehabOffsetIri = new Dictionary<string, double>();
+    private Dictionary<string, double> _staleSurveyResurfacingRut = new Dictionary<string, double>();
+    private Dictionary<string, double> _staleSurveyResurfacingIri = new Dictionary<string, double>();
 
 
     /// <summary>
@@ -363,12 +375,116 @@ public class Constants
 
     #endregion
 
+    #region Treatment reset values
+
+    // WHY THESE ARE LOOKUPS AND NOT COEFFICIENTS. Every number in this region is a modelling decision
+    // taken from the as-new condition the engineer specified, not a fitted result. A refit regenerates
+    // the CSV files in the 'supporting' folder as a whole set; it does not touch these, and they must
+    // stay where a modeller can change one of them without a rebuild.
+
+    /// <summary>
+    /// Cracking percentage a rehabilitation resets to. Zero - the pavement is new, so there is nothing
+    /// left underneath for cracking to reflect through.
+    /// </summary>
+    public double RehabResetCrackingPercent { get { return _rehabResetCrackingPercent; } }
+
+    /// <summary>
+    /// Rut depth in mm a rehabilitation resets to. JUDGEMENT, not fitted: it is this network's own
+    /// asphalt 'as new' baseline.
+    /// </summary>
+    public double RehabResetRutMillimetres { get { return _rehabResetRutMillimetres; } }
+
+    /// <summary>
+    /// IRI a rehabilitation resets to. JUDGEMENT, not fitted.
+    /// </summary>
+    public double RehabResetIri { get { return _rehabResetIri; } }
+
+    /// <summary>
+    /// Central deflection a rehabilitation resets a segment of this group to - the group median for a
+    /// new pavement. A domain rule: the survey data contains no reconstructed pavement to measure.
+    /// </summary>
+    public double GetRehabResetDeflection(string deteriorationGroup)
+    {
+        return GetForGroup(_rehabResetDeflection, deteriorationGroup, RehabResetSet, "d0");
+    }
+
+    /// <summary>
+    /// Permanent offset added to the log rut level for the rest of a rehabilitated segment's life.
+    ///
+    /// <para>WITHOUT IT THE RESET DOES NOT HOLD. Every segment the models were fitted on is a surfacing
+    /// over an old pavement - median pavement age 63 years, and not one reconstructed pavement in the
+    /// file - so the model's prediction at surface age zero means "a fresh surface on a sixty-year-old
+    /// pavement", not "a new road". Set a rehabilitated segment to 2.0 mm, recompute the next period,
+    /// and the model snaps it straight back to 3.66 mm.</para>
+    ///
+    /// <para>Each offset is min(0, log(as-new target) - median log level at surface age zero). The floor
+    /// at zero is not decoration: asphalt rutting already predicts better than its as-new target, so an
+    /// unfloored offset would make a full reconstruction WORSE than a reseal.</para>
+    /// </summary>
+    public double GetRehabOffsetRut(string deteriorationGroup)
+    {
+        return GetForGroup(_rehabOffsetRut, deteriorationGroup, RehabOffsetSet, "rut");
+    }
+
+    /// <summary>
+    /// Permanent offset added to the log IRI level for the rest of a rehabilitated segment's life. Same
+    /// reasoning as the rutting offset: without it a rebuilt segment snaps back to IRI 4.44 on asphalt
+    /// and 5.72 on chipseal the period after it was rebuilt.
+    /// </summary>
+    public double GetRehabOffsetIri(string deteriorationGroup)
+    {
+        return GetForGroup(_rehabOffsetIri, deteriorationGroup, RehabOffsetSet, "iri");
+    }
+
+    /// <summary>
+    /// Factor applied to a surveyed rut depth when the segment was RESURFACED after that survey, so
+    /// that year zero describes the surface the segment actually has.
+    /// <para>The chipseal factor is 1.0 on purpose - a seal follows the shape of what it is laid on and
+    /// inherits the rut rather than renewing it, which this network's data shows directly.</para>
+    /// </summary>
+    public double GetStaleSurveyResurfacingFactorRut(string deteriorationGroup)
+    {
+        return GetForGroup(_staleSurveyResurfacingRut, deteriorationGroup, StaleSurveyResurfacingSet, "rut");
+    }
+
+    /// <summary>
+    /// Factor applied to a surveyed IRI when the segment was RESURFACED after that survey. Roughness
+    /// renews on both classes - strongly on asphalt, weakly on chipseal.
+    /// </summary>
+    public double GetStaleSurveyResurfacingFactorIri(string deteriorationGroup)
+    {
+        return GetForGroup(_staleSurveyResurfacingIri, deteriorationGroup, StaleSurveyResurfacingSet, "iri");
+    }
+
+    /// <summary>
+    /// Reads one group-keyed value, naming the group, the set and the key it was looking for. The
+    /// dictionaries are filled at setup, so this only fires if a segment resolves to a group that the
+    /// 'surf_class_group' lookup set names but these sets do not.
+    /// </summary>
+    private static double GetForGroup(Dictionary<string, double> valuesByGroup, string deteriorationGroup,
+                                      string setName, string quantity)
+    {
+        if (valuesByGroup.TryGetValue(deteriorationGroup, out double value))
+        {
+            return value;
+        }
+
+        throw new Exception($"Lookup set '{setName}' in lookups.xlsx has no '{quantity}_{deteriorationGroup}' " +
+                            $"row, so there is no value for deterioration group '{deteriorationGroup}'. Every " +
+                            $"group named in the 'surf_class_group' set needs one.");
+    }
+
+    #endregion
+
     #region Guarded lookup readers
 
     private const string DeteriorationSet = "deterioration";
     private const string FeedbackSet = "deterioration_feedback";
     private const string RuleDistressSet = "rule_distress";
     private const string SurfaceClassGroupSet = "surf_class_group";
+    private const string RehabResetSet = "rehab_resets";
+    private const string RehabOffsetSet = "rehab_offsets";
+    private const string StaleSurveyResurfacingSet = "stale_survey_resurf";
     private const string DefaultKey = "default";
 
     /// <summary>
@@ -464,6 +580,22 @@ public class Constants
         _ruleTrafficFactor = GetNumber(lookupSets, RuleDistressSet, "traffic_factor");
 
         _surfaceClassGroups = GetSet(lookupSets, SurfaceClassGroupSet);
+
+        // The treatment reset values, and the three group-keyed sets that go with them. Unpacked per
+        // group here rather than read on demand, so that a missing row stops the run at setup instead
+        // of part way through the first period that happens to treat a segment of that group.
+        _rehabResetCrackingPercent = GetNumber(lookupSets, RehabResetSet, "crack_pct");
+        _rehabResetRutMillimetres = GetNumber(lookupSets, RehabResetSet, "rut_mm");
+        _rehabResetIri = GetNumber(lookupSets, RehabResetSet, "iri");
+
+        foreach (string group in DeteriorationModels.ModelGroups)
+        {
+            _rehabResetDeflection[group] = GetNumber(lookupSets, RehabResetSet, $"d0_{group}");
+            _rehabOffsetRut[group] = GetNumber(lookupSets, RehabOffsetSet, $"rut_{group}");
+            _rehabOffsetIri[group] = GetNumber(lookupSets, RehabOffsetSet, $"iri_{group}");
+            _staleSurveyResurfacingRut[group] = GetNumber(lookupSets, StaleSurveyResurfacingSet, $"rut_{group}");
+            _staleSurveyResurfacingIri[group] = GetNumber(lookupSets, StaleSurveyResurfacingSet, $"iri_{group}");
+        }
 
     }
 

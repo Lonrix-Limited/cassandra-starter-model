@@ -199,13 +199,33 @@ public class DeteriorationModels
     #region Rutting and roughness - level models
 
     /// <summary>
-    /// Mean of the log rut depth at the given surface age.
+    /// Mean of the log rut depth at the given surface age, including the rehabilitation offset where
+    /// the segment has been rebuilt.
+    ///
+    /// <para>THE OFFSET IS ADDED HERE, IN ONE PLACE, AND THAT IS THE POINT. Everything that evaluates
+    /// the rutting model reads this method - the forward model and the year-zero inversion both - so
+    /// the two cannot drift apart. Add it at the call sites instead and the inversion stops being the
+    /// exact inverse of the forward model, which shows up only as a segment that no longer reproduces
+    /// its own starting condition.</para>
     /// </summary>
     public double RutMu(RoadSegment segment, double surfaceAgeYears)
     {
         FittedModel model = this.ModelFor(_coefficients.Rut, segment, "rutting");
-        return model.LinearPredictor(this.LogAge(surfaceAgeYears), LogTraffic(segment.SurveyedAverageDailyTraffic),
-                                     segment.CentralDeflection, segment.HeavyVehiclePercentage);
+        double mu = model.LinearPredictor(this.LogAge(surfaceAgeYears), LogTraffic(segment.SurveyedAverageDailyTraffic),
+                                          segment.CentralDeflection, segment.HeavyVehiclePercentage);
+        return mu + this.RehabilitationOffsetRut(segment);
+    }
+
+    /// <summary>
+    /// The permanent log-space offset a rehabilitated segment carries in the rutting model, and zero
+    /// for every segment that has not been rebuilt.
+    /// <para>Without it, setting a rehabilitated segment to its as-new rut depth achieves nothing: the
+    /// next period the model recomputes from a fit built entirely on surfacings over sixty-year-old
+    /// pavements and snaps the segment straight back. The lookup comment carries the full reasoning.</para>
+    /// </summary>
+    private double RehabilitationOffsetRut(RoadSegment segment)
+    {
+        return segment.HasBeenRehabilitated ? _constants.GetRehabOffsetRut(segment.DeteriorationGroup) : 0.0;
     }
 
     /// <summary>Residual standard deviation of the rutting fit for this segment's group.</summary>
@@ -256,13 +276,25 @@ public class DeteriorationModels
     }
 
     /// <summary>
-    /// Mean of the log IRI at the given surface age.
+    /// Mean of the log IRI at the given surface age, including the rehabilitation offset where the
+    /// segment has been rebuilt. Added here for the same reason as in the rutting model: one place, so
+    /// that the forward model and the inversion cannot disagree.
     /// </summary>
     public double IriMu(RoadSegment segment, double surfaceAgeYears)
     {
         FittedModel model = this.ModelFor(_coefficients.Iri, segment, "roughness");
-        return model.LinearPredictor(this.LogAge(surfaceAgeYears), LogTraffic(segment.SurveyedAverageDailyTraffic),
-                                     segment.CentralDeflection, segment.HeavyVehiclePercentage);
+        double mu = model.LinearPredictor(this.LogAge(surfaceAgeYears), LogTraffic(segment.SurveyedAverageDailyTraffic),
+                                          segment.CentralDeflection, segment.HeavyVehiclePercentage);
+        return mu + this.RehabilitationOffsetIri(segment);
+    }
+
+    /// <summary>
+    /// The permanent log-space offset a rehabilitated segment carries in the roughness model, and zero
+    /// for every segment that has not been rebuilt.
+    /// </summary>
+    private double RehabilitationOffsetIri(RoadSegment segment)
+    {
+        return segment.HasBeenRehabilitated ? _constants.GetRehabOffsetIri(segment.DeteriorationGroup) : 0.0;
     }
 
     /// <summary>Residual standard deviation of the roughness fit for this segment's group.</summary>
@@ -280,6 +312,84 @@ public class DeteriorationModels
         iri *= (1.0 + _constants.DetFeedbackRutOnIri * rutMillimetres / 10.0);
 
         return iri;
+    }
+
+    /// <summary>
+    /// Recomputes a segment's cracking, rutting and roughness at the given surface age, and records
+    /// what changed. This is the whole per-period condition update, and BOTH the Incrementer and the
+    /// Resetter call it - an untreated segment at its new age, a treated one at whatever age its
+    /// treatment left behind.
+    ///
+    /// <para>ONE COPY ON PURPOSE. The order is fixed - cracking, then rutting, then roughness - because
+    /// rutting and roughness each take a feedback term in cracking and roughness takes one in rutting.
+    /// All three feedback coefficients default to zero, so today the order changes no number, but they
+    /// are switchable from lookups.xlsx and once they are on, an increment path and a reset path that
+    /// had drifted out of step would give different answers with nothing reporting it.</para>
+    ///
+    /// <para>Nothing here reads the previous value to build the new one - these are levels, not
+    /// increments. The previous values are read only so that the two diagnostic increments can report
+    /// the realised change over the period.</para>
+    /// </summary>
+    public void UpdateConditions(RoadSegment segment, double surfaceAgeYears)
+    {
+        double rutBefore = segment.RutParameterValue;
+        double iriBefore = segment.Iri;
+
+        // 1. Cracking. Either the segment has cracked at this age, in which case its severity comes
+        //    from the left-truncated distribution, or it has not, in which case it carries the
+        //    sub-threshold value it has held since the surface was laid.
+        segment.PctCracking = this.GetCracking(segment, surfaceAgeYears);
+
+        // 2. Rutting, which takes cracking as a feedback term.
+        segment.RutParameterValue = this.GetRutting(segment, surfaceAgeYears, segment.PctCracking);
+
+        // 3. Roughness, which takes both cracking and rutting as feedback terms.
+        segment.Iri = this.GetRoughness(segment, surfaceAgeYears, segment.PctCracking, segment.RutParameterValue);
+
+        // Naasra needs no update: it is derived from Iri on every read.
+
+        RecordRealisedChange(segment, rutBefore, iriBefore);
+    }
+
+    /// <summary>
+    /// Sets the two diagnostic increment parameters to the change the period actually produced.
+    ///
+    /// <para>DIAGNOSTIC ONLY. Nothing reads either of them back to build the next value - these models
+    /// are levels. They are worth keeping because a realised year-on-year change is what a modeller
+    /// looks at first, but do not mistake them for a rate that drives anything. Both are declared with
+    /// a minimum below zero, because a treatment makes them negative and the framework clamps every
+    /// write silently: at a minimum of zero the post-treatment drop they exist to show would be
+    /// recorded as zero with nothing saying so.</para>
+    /// </summary>
+    public static void RecordRealisedChange(RoadSegment segment, double rutBefore, double iriBefore)
+    {
+        segment.RutIncrement = segment.RutParameterValue - rutBefore;
+        segment.IriIncrement = segment.Iri - iriBefore;
+    }
+
+    /// <summary>
+    /// Recomputes flushing and ravelling from the rule-based model at the given surface age. Both are
+    /// zero on a new surface and stay zero until a fraction of its expected life has passed, so a
+    /// resurfacing and a rehabilitation reset them with no arithmetic at all.
+    /// </summary>
+    public void UpdateRuleBasedDistresses(RoadSegment segment, double surfaceAgeYears)
+    {
+        segment.PctFlushing = this.GetFlushing(segment, surfaceAgeYears);
+        segment.PctRavelling = this.GetRavelling(segment, surfaceAgeYears);
+    }
+
+    /// <summary>
+    /// Draws a fresh persistent deviate for one of the level models, clamped the same way an inverted
+    /// one is.
+    /// <para>The clamp matters as much on a draw as on an inversion: it is what stops one segment in
+    /// forty being handed a lifetime of deterioration well outside the evidence, and applying it in
+    /// both places is what keeps a rehabilitated segment's spread the same as that of the network it
+    /// rejoins.</para>
+    /// </summary>
+    public double DrawLevelDeviate(Random random)
+    {
+        double deviate = NormalDistribution.PhiInverse(random.NextDouble());
+        return Math.Clamp(deviate, -_constants.DetMultiplierClampSd, _constants.DetMultiplierClampSd);
     }
 
     #endregion

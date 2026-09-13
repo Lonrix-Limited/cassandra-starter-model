@@ -244,6 +244,7 @@ public static class RoadSegmentFactory
         segment.CrackingInitSource = Convert.ToInt32(numParamValues["par_crack_init_src"]);
         segment.RutInitSource = Convert.ToInt32(numParamValues["par_rut_init_src"]);
         segment.IriInitSource = Convert.ToInt32(numParamValues["par_iri_init_src"]);
+        segment.HasBeenRehabilitated = numParamValues["par_rehab_flag"] == 1;
 
         // STAGE 4 (treatments trigger): par_csl_status and par_csl_flag carry the candidate selection
         // outcome from the previous period and are not read back yet. Neither are the PDI, SDI, objective

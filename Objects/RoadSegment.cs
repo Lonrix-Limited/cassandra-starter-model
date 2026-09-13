@@ -723,6 +723,27 @@ public class RoadSegment
     /// </summary>
     public int IriInitSource { get; set; }
 
+    /// <summary>
+    /// True once the model has rehabilitated this segment, and never false again afterwards.
+    ///
+    /// <para>WHAT IT CARRIES. A rehabilitation is the one treatment the fitted models cannot describe:
+    /// every segment they were built on is a surfacing over an old pavement - median pavement age 63
+    /// years, not one reconstructed pavement in the whole file - so their prediction at surface age
+    /// zero means "a fresh surface on a sixty-year-old pavement", not "a new road". A rebuilt segment
+    /// therefore carries a permanent offset in log space, from the 'rehab_offsets' lookup set, for the
+    /// rest of its life. This flag is what remembers that it is entitled to one.</para>
+    ///
+    /// <para>It survives a later resurfacing on purpose: a reseal does not undo the fact that the
+    /// pavement underneath was rebuilt. It is also deliberately NOT the same thing as the treatment
+    /// count, which counts reseals too.</para>
+    ///
+    /// <para>Segments rehabilitated before the base date do not carry it. Their condition comes from a
+    /// survey, and the year-zero inversion already places them - see the Initialiser. The exception is
+    /// a segment rehabilitated AFTER its last survey, which has no usable reading and is initialised
+    /// from the model as a rebuilt pavement.</para>
+    /// </summary>
+    public bool HasBeenRehabilitated { get; set; }
+
     /// <summary>Value of CrackingInitSource, RutInitSource or IriInitSource for a surveyed segment.</summary>
     public const int InitSourceSurveyed = 0;
 
@@ -1142,6 +1163,7 @@ public class RoadSegment
         numModParamValues("par_crack_init_src", this.CrackingInitSource);
         numModParamValues("par_rut_init_src", this.RutInitSource);
         numModParamValues("par_iri_init_src", this.IriInitSource);
+        numModParamValues("par_rehab_flag", Convert.ToDouble(this.HasBeenRehabilitated));
     }
     #endregion
 

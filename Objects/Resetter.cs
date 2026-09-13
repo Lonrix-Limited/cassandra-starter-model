@@ -1,4 +1,3 @@
-﻿
 using JCass_ModelCore.Models;
 using JCass_ModelCore.Treatments;
 
@@ -6,7 +5,32 @@ using JCass_ModelCore.Treatments;
 namespace StarterModel.Objects;
 
 /// <summary>
-/// Class to handle Resetting, with supporting logic and helper functions
+/// Applies a treatment to a segment and advances it by one modelling period.
+///
+/// <para>MOST OF A RESET IS A CHANGE OF CLOCK, NOT ARITHMETIC ON A VALUE. The condition models are
+/// levels: cracking, rutting and roughness are recomputed every period from the segment's surface age
+/// and its own persistent draws. So resetting the surface age to zero IS the resurfacing reset - it
+/// takes cracking back to what a new surface carries, asphalt rutting to about 36% of where it was,
+/// and roughness to 74% on asphalt and 92% on chipseal. There is no reset lookup behind any of that
+/// and there must not be one.</para>
+///
+/// <para>THERE ARE TWO CLOCKS AND KEEPING THEM APART IS THE WHOLE JOB. The surface age drives
+/// cracking, asphalt rutting, roughness on both classes, flushing and ravelling. The chipseal rut
+/// growth accumulator drives the chipseal rut increment and nothing else. A resurfacing resets the
+/// first and leaves the second running, because a seal follows the shape of what it is laid on and
+/// inherits the rut rather than renewing it. A rehabilitation resets both.</para>
+///
+/// <para>A REHABILITATION IS THE ONE TREATMENT THE FITTED MODELS CANNOT DESCRIBE, so it is the one
+/// place values are imposed. Every segment in the fitted data is a surfacing over an old pavement -
+/// median pavement age 63 years, not one reconstructed pavement in the file - so the models' age-zero
+/// prediction means "a fresh surface on a sixty-year-old pavement". Setting a rebuilt segment to its
+/// as-new condition and recomputing next period would snap it straight back, which is what the
+/// permanent offsets carried by RoadSegment.HasBeenRehabilitated exist to stop.</para>
+///
+/// <para>THIS CLASS RUNS IN PARALLEL. The framework steps elements under Parallel.For when the run has
+/// DoParallel on, so every random draw here comes from a generator derived from the run seed and the
+/// element index - never from the shared model generator, which is not thread safe and whose sequence
+/// would depend on thread scheduling.</para>
 /// </summary>
 public class Resetter
 {
@@ -22,13 +46,15 @@ public class Resetter
 
     public RoadSegment Reset(RoadSegment segment, int period, TreatmentInstance treatment)
     {
-        
+
         if (treatment is null) return segment;
 
-        string treatmentCategory = _frameworkModel.TreatmentTypes[treatment.TreatmentName].Category;
         string treatmentName = treatment.TreatmentName.ToLower();
         bool isRehab = treatmentName.StartsWith("rehab");
         bool isPreseal = treatmentName.StartsWith("hmaint") || treatmentName.StartsWith("preseal");
+
+        // Every draw below comes from here. See GetSegmentRandom for why it is not model.Random.
+        Random random = GetSegmentRandom(_frameworkModel.RandomSeed, segment.ElementIndex, period);
 
         // Reset (or increment where not applicable) all properties related to model parameters
         // Keep the code same order as the model parameter list
@@ -50,9 +76,15 @@ public class Resetter
         // No need to update Pavement Life Achieved and HCV Risk because it is automatically calculated based on the HCV and Pavement Life Achieved
 
         segment.SurfaceMaterial = _frameworkModel.GetLookupValueText("treat_surf_materials", treatment.TreatmentName);
-        segment.SurfaceClass = _frameworkModel.GetLookupValueText("treat_surf_class", treatment.TreatmentName);        
-        
-        // If rehab, number of surfacing becomes 1. Otherwise, increase number of surfacings but only if it is a chipseal. If AC, then it remains the same.                
+        segment.SurfaceClass = _frameworkModel.GetLookupValueText("treat_surf_class", treatment.TreatmentName);
+
+        // The surface class just changed, and the deterioration group follows it. Re-resolve it here or
+        // every model evaluated below runs on the group the segment had BEFORE the treatment - an
+        // asphalt rehabilitation on a chipseal segment would be costed with the chipseal models for the
+        // period it lands in, and correct itself silently the period after.
+        segment.DeteriorationGroup = _domainModel.Constants.GetDeteriorationGroup(segment.SurfaceClass);
+
+        // If rehab, number of surfacing becomes 1. Otherwise, increase number of surfacings but only if it is a chipseal. If AC, then it remains the same.
         if (isRehab)
         {
             //Surface Thickness to reset to, based on lookup of surface material type applied if treatment is pavement renewal (Rehab)
@@ -69,7 +101,7 @@ public class Resetter
         }
 
         segment.SurfaceFunction = this.GetSurfaceFunction(treatment.TreatmentName, isPreseal, segment.SurfaceFunction);
-        
+
         segment.SurfaceExpectedLife = this.GetExpectedSurfaceLife(segment);
         segment.SurfaceAge = isPreseal ? segment.SurfaceAge + 1 : 0;  //All treatments reset surface age to zero except if Preseal
         // Note: surface life achieved and surface remaining life are automatically calculated based on the surface age and expected life
@@ -81,42 +113,16 @@ public class Resetter
         // asphalt goes the other way. Only a rehabilitation returns it to zero.
         segment.RutGrowthYears = isRehab ? 0.0 : segment.RutGrowthYears + 1;
 
-        // Reset visual distresses
-        double flushingPrevious = segment.PctFlushing;
-        segment.PctFlushing = _domainModel.FlushingModel.GetValueAfterReset(segment, segment.PctFlushing,treatmentCategory);
-        segment.FlushingModelInfo = _domainModel.FlushingModel.GetResettedSetupValues(segment, flushingPrevious, treatmentCategory, segment.FlushingModelInfo);
+        if (isRehab)
+        {
+            this.ApplyRehabilitation(segment, random);
+        }
+        else
+        {
+            this.ApplySurfaceTreatment(segment, isPreseal, random);
+        }
 
-        double edgeBreaksPrevious = segment.PctEdgeBreaks;
-        segment.PctEdgeBreaks = _domainModel.EdgeBreakModel.GetValueAfterReset(segment, segment.PctEdgeBreaks, treatmentCategory);
-        segment.EdgeBreakModelInfo = _domainModel.EdgeBreakModel.GetResettedSetupValues(segment, edgeBreaksPrevious, treatmentCategory, segment.EdgeBreakModelInfo);
-
-        double scabbingPrevious = segment.PctScabbing;
-        segment.PctScabbing = _domainModel.ScabbingModel.GetValueAfterReset(segment, segment.PctScabbing, treatmentCategory);
-        segment.ScabbingModelInfo = _domainModel.ScabbingModel.GetResettedSetupValues(segment, scabbingPrevious, treatmentCategory, segment.ScabbingModelInfo);
-
-        double ltCrackingPrevious = segment.PctLongTransCracks;
-        segment.PctLongTransCracks = _domainModel.LTCracksModel.GetValueAfterReset(segment, segment.PctLongTransCracks, treatmentCategory);
-        segment.LTCracksModelInfo = _domainModel.LTCracksModel.GetResettedSetupValues(segment, ltCrackingPrevious, treatmentCategory, segment.LTCracksModelInfo);
-
-        double meshCracksPrevious = segment.PctMeshCracks;
-        segment.PctMeshCracks = _domainModel.MeshCrackModel.GetValueAfterReset(segment, segment.PctMeshCracks, treatmentCategory);
-        segment.MeshCrackModelInfo = _domainModel.MeshCrackModel.GetResettedSetupValues(segment, meshCracksPrevious, treatmentCategory, segment.MeshCrackModelInfo);
-
-        double shovingPrevious = segment.PctShoving;
-        segment.PctShoving = _domainModel.ShovingModel.GetValueAfterReset(segment, segment.PctShoving, treatmentCategory);
-        segment.ShovingModelInfo = _domainModel.ShovingModel.GetResettedSetupValues(segment, shovingPrevious, treatmentCategory, segment.ShovingModelInfo);
-
-        double potholesPrevious = segment.PctPotholes;
-        segment.PctPotholes = _domainModel.PotholeModel.GetValueAfterReset(segment, segment.PctPotholes, treatmentCategory);
-        segment.PotholeModelInfo = _domainModel.PotholeModel.GetResettedSetupValues(segment, potholesPrevious, treatmentCategory, segment.PotholeModelInfo);
-
-        segment.RutParameterValue = this.GetResetttedRut(segment, treatmentCategory);
-        segment.RutIncrement = segment.GetRutIncrementAfterTreatment();
-        
-        segment.Naasra85 = this.GetResetttedNaasra(segment, isRehab);
-        segment.NaasraIncrement = segment.GetNaasraIncrementAfterTreatment();
-
-        // Increase the treatment count for the segment. This will also mark the treatment as treated, and reset the 
+        // Increase the treatment count for the segment. This will also mark the treatment as treated, and reset the
         // historical maintenance quantities so that it no longer influences PDI and SDI calculations.
         segment.TreatmentCount++;
 
@@ -126,10 +132,149 @@ public class Resetter
 
     }
 
+    #region The two condition resets
+
+    /// <summary>
+    /// Applies a rehabilitation: a new pavement under a new surface.
+    ///
+    /// <para>THIS IS THE ONLY PLACE CONDITION VALUES ARE IMPOSED, and it has to be, because the fitted
+    /// models have never seen a reconstructed pavement. At surface age zero with rehabilitated
+    /// deflection they predict 3.66 mm of chipseal rut and IRI 4.44 on asphalt, 5.72 on chipseal - all
+    /// worse than the as-new condition a rebuilt road is meant to start at. So the as-new values are
+    /// set here, and the permanent offsets the segment now carries are what stop the model pulling it
+    /// back the moment the next period recomputes.</para>
+    ///
+    /// <para>The persistent draws are all replaced, because it is a different pavement: the rut and IRI
+    /// deviates are redrawn, and the cracking draws are redrawn from the band that means "has not
+    /// cracked at this age", which is the same rule the Initialiser uses for a segment surveyed below
+    /// the threshold. A blind redraw instead would put 62% of rebuilt asphalt segments back above the
+    /// cracking threshold one year after reconstruction; drawn this way it is 40%.</para>
+    ///
+    /// <para>THAT 40% IS STILL TOO HIGH AND THE DRAW CANNOT FIX IT. The onset probability itself climbs
+    /// steeply with surface age - 0.36 at age zero and 0.62 at age one on asphalt at rehabilitated
+    /// deflection - and cracking carries no as-new offset the way rutting and roughness do, because
+    /// there is no as-new cracking value to derive one from. Closing the gap needs an offset on onset,
+    /// and that needs a number from the engineer. Flagged, not invented.</para>
+    /// </summary>
+    private void ApplyRehabilitation(RoadSegment segment, Random random)
+    {
+        DeteriorationModels models = _domainModel.DeteriorationModels;
+        Constants constants = _domainModel.Constants;
+
+        double rutBefore = segment.RutParameterValue;
+        double iriBefore = segment.Iri;
+
+        // The pavement is new, so its structural measurement is too. This has to be set before anything
+        // below is evaluated: deflection is a covariate in the cracking onset, chipseal rutting and both
+        // roughness models, and it is the one covariate a rehabilitation changes.
+        segment.CentralDeflection = constants.GetRehabResetDeflection(segment.DeteriorationGroup);
+
+        // From here on the segment is a rebuilt pavement, and every later period evaluates its rutting
+        // and roughness with the as-new offsets. Never set back to false: a reseal in twenty years does
+        // not make the pavement underneath old again.
+        segment.HasBeenRehabilitated = true;
+
+        // A different pavement deteriorates differently, so the segment's character is redrawn rather
+        // than kept. Clamped exactly as an inverted deviate is, which is what keeps the spread of
+        // rebuilt segments the same as the spread of the network they rejoin.
+        segment.RutDeviate = models.DrawLevelDeviate(random);
+        segment.IriDeviate = models.DrawLevelDeviate(random);
+
+        // The surface age is already zero here, so this draws a position that does not produce onset on
+        // a new surface over a new pavement.
+        segment.CrackOnsetPosition = models.DrawOnsetPositionBelowOnset(segment, random);
+        segment.CrackSeverityQuantile = random.NextDouble();
+        segment.CrackingBelowOnset = models.DrawCrackingBelowOnset(segment, random);
+
+        // The as-new condition. Imposed, not modelled - see the class summary for why the models cannot
+        // supply it themselves.
+        segment.PctCracking = constants.RehabResetCrackingPercent;
+        segment.RutParameterValue = constants.RehabResetRutMillimetres;
+        segment.Iri = constants.RehabResetIri;
+
+        DeteriorationModels.RecordRealisedChange(segment, rutBefore, iriBefore);
+
+        // Flushing and ravelling fall out of the surface age with no arithmetic: a new surface is below
+        // the onset age, so both come back zero.
+        models.UpdateRuleBasedDistresses(segment, segment.SurfaceAge);
+    }
+
+    /// <summary>
+    /// Applies a treatment that renews the surface but not the pavement - a reseal, a thin asphalt
+    /// overlay, or a preseal repair that renews neither.
+    ///
+    /// <para>THERE IS ALMOST NOTHING TO DO HERE, AND THAT IS THE DESIGN. The clocks were moved by the
+    /// caller, and the models read them: cracking comes back to what a new surface carries, asphalt
+    /// rutting to about 36% of where it was, roughness to 74% on asphalt and 92% on chipseal, and
+    /// chipseal rutting carries straight on because its own accumulator was left alone.</para>
+    ///
+    /// <para>Cracking is NOT forced to zero, and that is deliberate: the fitted model puts 36% of
+    /// asphalt and 31% of chipseal above the threshold on a brand new surface, which is reflective
+    /// cracking coming through from the old pavement below. Forcing zero would delete a real effect.</para>
+    ///
+    /// <para>The persistent draws are all retained - that is what makes a segment keep its own character
+    /// across a reseal - except the held sub-threshold cracking value, which is redrawn with the new
+    /// surface. One consequence, so it is not mistaken for a bug: a segment below the threshold can
+    /// come out very slightly higher after a reseal, bounded by one percentage point, because both
+    /// values are sub-threshold by construction. A run that asserts condition never worsens across a
+    /// treatment should apply that assertion at or above the onset threshold only.</para>
+    ///
+    /// <para>A PRESEAL REPAIR CHANGES NO CONDITION AT ALL, and that is worth knowing rather than
+    /// discovering. It renews no surface, so no clock moves and every model returns what a year of
+    /// ageing returns. The jFunction-era model gave heavy maintenance a partial improvement through the
+    /// reset lookups that were deleted; the new specification covers resurfacing and rehabilitation and
+    /// says nothing about repairs, so there is nothing here to put in their place. It matters for the
+    /// treatments trigger, where a treatment with no modelled benefit will never earn its cost.</para>
+    /// </summary>
+    private void ApplySurfaceTreatment(RoadSegment segment, bool isPreseal, Random random)
+    {
+        DeteriorationModels models = _domainModel.DeteriorationModels;
+
+        if (!isPreseal)
+        {
+            segment.CrackingBelowOnset = models.DrawCrackingBelowOnset(segment, random);
+        }
+
+        models.UpdateConditions(segment, segment.SurfaceAge);
+        models.UpdateRuleBasedDistresses(segment, segment.SurfaceAge);
+    }
+
+    #endregion
+
+    /// <summary>
+    /// A random generator for one element in one period, derived from the run seed rather than shared.
+    ///
+    /// <para>WHY NOT model.Random. The framework steps elements under Parallel.For when DoParallel is
+    /// on, and System.Random is not thread safe: concurrent draws corrupt its internal state, and the
+    /// run stops being reproducible from its seed with nothing reporting it. Locking a shared generator
+    /// would fix the corruption and leave a worse problem, because the sequence each element received
+    /// would then depend on the order the threads happened to reach it.</para>
+    ///
+    /// <para>Deriving the seed from the run seed, the element and the period gives each element its own
+    /// independent stream, and the same stream whatever order the elements are processed in. The mixing
+    /// below is a standard 64-bit avalanche: seeding System.Random with a raw sum would leave nearby
+    /// elements with visibly similar first draws.</para>
+    /// </summary>
+    private static Random GetSegmentRandom(int runSeed, int elementIndex, int period)
+    {
+        unchecked
+        {
+            ulong z = (ulong)(uint)runSeed * 0x9E3779B97F4A7C15UL
+                    + (ulong)(uint)elementIndex * 0xBF58476D1CE4E5B9UL
+                    + (ulong)(uint)period * 0x94D049BB133111EBUL;
+
+            z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9UL;
+            z = (z ^ (z >> 27)) * 0x94D049BB133111EBUL;
+            z ^= z >> 31;
+
+            return new Random((int)(z & 0x7FFFFFFFUL));
+        }
+    }
+
     private string GetSurfaceFunction(string treatmentName, bool isPreseal, string currentSurfaceFunction)
     {
         if (isPreseal) return "1a";
-        
+
         if (treatmentName.ToLower().StartsWith("rehab_ac")) return "2";
 
         if (treatmentName.ToLower().StartsWith("rehab_cs")) return "1";
@@ -153,7 +298,7 @@ public class Resetter
         if (segment.SurfaceClass == "other") return segment.SurfaceExpectedLife;
 
         // Since preseal is a temporary treatment, it does not have an actual expected life
-        // So based the expected life on the Reseal 'R' surface function - this is needed for the S-curve reset 
+        // So base the expected life on the Reseal 'R' surface function
         string surfFuncToUse = segment.SurfaceFunction == "1a" ? "R" : segment.SurfaceFunction;
 
         string lookupKey = $"{surfFuncToUse}_{segment.SurfaceMaterial}_{segment.RoadClass}".ToLower();
@@ -165,71 +310,7 @@ public class Resetter
         else
         {
             throw new KeyNotFoundException($"Expected surface life not found for {segment.FeebackCode}. Surface function = '{segment.SurfaceFunction}', Material = '{segment.SurfaceMaterial}', Road class = '{segment.RoadClass}'.");
-        }        
+        }
     }
-    
-    private double GetResetttedRut(RoadSegment segment, string treatmnentCatAnyCase)
-    {        
-        if (segment.SurfaceIsChipSealOrACFlag == 0)
-        {
-            return segment.RutParameterValue; // Rut remains constant for non ChipSeal or AC surfaces
-        }
-
-        if (segment.SurfaceFunction == "1a")
-        {
-            return segment.RutParameterValue; // This indicates preseal has just been applied, so no reset
-        }
-
-        string treatmentCategory = treatmnentCatAnyCase.ToLower();
-        
-        if (treatmentCategory.Contains("rehab"))
-        {
-            return _frameworkModel.GetLookupValueNumber("rehab_resets_rut", "all_cats");
-        }
-        else if (treatmentCategory.Contains("holding") || treatmentCategory.Contains("heavymaint"))
-        {
-            double exceedanceThreshold = _frameworkModel.GetLookupValueNumber("reset_exceed_thresh_rut", "holding_or_repairs");
-            double improvementFactor = _frameworkModel.GetLookupValueNumber("reset_perc_improv_facts_rut", "holding_or_repairs");
-            return CalculationUtilities.GetResetBasedOnExceedanceConcept(segment.RutParameterValue, exceedanceThreshold, improvementFactor);
-        }
-        else if (treatmentCategory.Contains("preserve"))
-        {
-            double exceedanceThreshold = _frameworkModel.GetLookupValueNumber("reset_exceed_thresh_rut", "preserve");
-            double improvementFactor = _frameworkModel.GetLookupValueNumber("reset_perc_improv_facts_rut", "preserve");
-            return CalculationUtilities.GetResetBasedOnExceedanceConcept(segment.RutParameterValue, exceedanceThreshold, improvementFactor);
-        }
-        else
-        {
-            throw new ArgumentException($"Treatment category '{treatmentCategory}' not handled in generic reset for S-Curve parameters");
-        }
-
-    }
-
-    private double GetResetttedNaasra(RoadSegment segment, bool isRehab)
-    {
-        if (segment.SurfaceIsChipSealOrACFlag == 0)
-        {
-            return segment.Naasra85; // Rut remains constant for non ChipSeal or AC surfaces
-        }
-
-        if (segment.SurfaceFunction == "1a")
-        {
-            return segment.Naasra85; // This indicates preseal has just been applied, so no reset
-        }
-
-        if (isRehab)
-        {
-            return _frameworkModel.GetLookupValueNumber("rehab_resets_naasra", segment.SurfaceRoadType);
-        }
-        else
-        {
-            double exceedanceThreshold = _frameworkModel.GetLookupValueNumber("reset_exceed_thresh_naasra", segment.SurfaceRoadType);
-            double improvementFactor = _frameworkModel.GetLookupValueNumber("reset_perc_improv_facts_naasra", segment.SurfaceRoadType);
-            return CalculationUtilities.GetResetBasedOnExceedanceConcept(segment.Naasra85, exceedanceThreshold, improvementFactor);
-        }
-
-
-    }
-
 
 }

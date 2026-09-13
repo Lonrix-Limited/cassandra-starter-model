@@ -64,8 +64,11 @@ public class Incrementer
         // The surface age just advanced is the clock every condition model below runs on.
         double surfaceAge = segment.SurfaceAge;
 
-        this.IncrementConditionModels(segment, surfaceAge);
-        this.IncrementRuleBasedDistresses(segment, surfaceAge);
+        // Both of these live on DeteriorationModels rather than here, because the Resetter runs exactly
+        // the same two steps after it has moved the clocks. One copy, so an increment and a reset cannot
+        // evaluate the models in a different order or with different feedback terms.
+        _domainModel.DeteriorationModels.UpdateConditions(segment, surfaceAge);
+        _domainModel.DeteriorationModels.UpdateRuleBasedDistresses(segment, surfaceAge);
 
         // Calculated parameters such as PDI, SDI and Objective Function Parameters should be calculated on return
 
@@ -80,57 +83,6 @@ public class Incrementer
 
         return segment;
 
-    }
-
-    /// <summary>
-    /// Recomputes cracking, rutting and roughness for the new surface age, in that order.
-    /// <para>Each is a level, so the previous value plays no part in building the new one. It is read
-    /// first only so that the realised change can be reported.</para>
-    /// </summary>
-    private void IncrementConditionModels(RoadSegment segment, double surfaceAge)
-    {
-        DeteriorationModels models = _domainModel.DeteriorationModels;
-
-        double rutBefore = segment.RutParameterValue;
-        double iriBefore = segment.Iri;
-
-        // 1. Cracking. Either the segment has cracked at this age, in which case its severity comes
-        //    from the left-truncated distribution, or it has not, in which case it carries the
-        //    sub-threshold value it has held since the surface was laid.
-        segment.PctCracking = models.GetCracking(segment, surfaceAge);
-
-        // 2. Rutting, which takes cracking as a feedback term.
-        segment.RutParameterValue = models.GetRutting(segment, surfaceAge, segment.PctCracking);
-
-        // 3. Roughness, which takes both cracking and rutting as feedback terms.
-        segment.Iri = models.GetRoughness(segment, surfaceAge, segment.PctCracking, segment.RutParameterValue);
-
-        // Naasra needs no update: it is derived from Iri on every read.
-
-        // The two increment parameters are now DIAGNOSTIC ONLY - they report what the level models
-        // actually did this period. Nothing reads them back to build the next value. They are worth
-        // keeping because a realised year-on-year change is what a modeller looks at first, but do not
-        // mistake them for a rate that drives anything.
-        segment.RutIncrement = segment.RutParameterValue - rutBefore;
-        segment.IriIncrement = segment.Iri - iriBefore;
-    }
-
-    /// <summary>
-    /// Recomputes flushing and ravelling from the rule-based model: nothing until a fraction of the
-    /// surface expected life has passed, then a straight line.
-    /// <para>These are JUDGEMENT, not fitted. The survey data carries no magnitude worth fitting -
-    /// nine in ten segments read zero flushing, and the 99th percentile is 1.5% - so the rates come
-    /// from engineering expertise and live in lookups.xlsx, where they can be changed without a rebuild.</para>
-    /// <para>Potholes take the same rule in the specification and are deliberately not modelled here:
-    /// this model carries no pothole parameter, and pothole extent never exceeds 0.12% anywhere on the
-    /// network, which is noise rather than signal.</para>
-    /// </summary>
-    private void IncrementRuleBasedDistresses(RoadSegment segment, double surfaceAge)
-    {
-        DeteriorationModels models = _domainModel.DeteriorationModels;
-
-        segment.PctFlushing = models.GetFlushing(segment, surfaceAge);
-        segment.PctRavelling = models.GetRavelling(segment, surfaceAge);
     }
 
 }
