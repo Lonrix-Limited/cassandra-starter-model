@@ -1,4 +1,4 @@
-
+﻿
 using JCass_ModelCore.Models;
 using JCass_ModelCore.Treatments;
 
@@ -73,6 +73,13 @@ public class Resetter
         segment.SurfaceExpectedLife = this.GetExpectedSurfaceLife(segment);
         segment.SurfaceAge = isPreseal ? segment.SurfaceAge + 1 : 0;  //All treatments reset surface age to zero except if Preseal
         // Note: surface life achieved and surface remaining life are automatically calculated based on the surface age and expected life
+
+        // The chipseal rut growth accumulator is a DIFFERENT clock from the surface age and must not be
+        // reset alongside it. A reseal leaves it running, because a chipseal follows the shape of what
+        // it is laid on and inherits the rut rather than renewing it - which is why chipseal rut reads
+        // 4.19 mm under surfaces up to six years old against 3.77 mm under surfaces over twenty, where
+        // asphalt goes the other way. Only a rehabilitation returns it to zero.
+        segment.RutGrowthYears = isRehab ? 0.0 : segment.RutGrowthYears + 1;
 
         // Reset visual distresses
         double flushingPrevious = segment.PctFlushing;

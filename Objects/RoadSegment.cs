@@ -1,4 +1,4 @@
-using JCass_Core.JFunctions;
+﻿using JCass_Core.JFunctions;
 using JCass_ModelCore.Models;
 
 namespace StarterModel.Objects;
@@ -659,6 +659,26 @@ public class RoadSegment
     public double IriDeviate { get; set; }
 
     /// <summary>
+    /// Years of chipseal rut growth accumulated so far - the clock behind the only part of the model
+    /// that is NOT a function of surface age.
+    ///
+    /// <para>It starts at ZERO at year zero, not at the segment's surface age, and that distinction is
+    /// the whole point. The chipseal rut level model carries no age term, so exp(mu) already reproduces
+    /// the segment's rut as surveyed today; driving the growth increment from the surface age as well
+    /// would add that growth a second time, inflating year-zero chipseal rutting by about 29% at the
+    /// median surface age and roughly doubling the share of the network reading above the 6 mm
+    /// reporting threshold before the forecast has run a single year.</para>
+    ///
+    /// <para>A resurfacing leaves it alone: a chipseal follows the shape of what it is laid on, so the
+    /// rut is inherited by the new seal rather than renewed. Measured on this network, chipseal rut is
+    /// 4.19 mm under surfaces up to six years old against 3.77 mm under surfaces over twenty - it does
+    /// not improve with a new seal, where asphalt rut does. A rehabilitation returns it to zero.</para>
+    ///
+    /// <para>Asphalt ignores this entirely; its rutting runs on surface age like everything else.</para>
+    /// </summary>
+    public double RutGrowthYears { get; set; }
+
+    /// <summary>
     /// The segment's position in the cracking onset order, between 0 and 1. The segment has cracked in
     /// any year where this sits below the modelled onset probability for its current surface age.
     /// <para>Deliberately compared afresh each year rather than latched into a flag. The comparison is
@@ -1115,6 +1135,7 @@ public class RoadSegment
         //    surfacing; see the 'Deterioration model state' region for why these must persist --
         numModParamValues("par_rut_z", this.RutDeviate);
         numModParamValues("par_iri_z", this.IriDeviate);
+        numModParamValues("par_rut_growth_yrs", this.RutGrowthYears);
         numModParamValues("par_crack_u_onset", this.CrackOnsetPosition);
         numModParamValues("par_crack_w_sev", this.CrackSeverityQuantile);
         numModParamValues("par_crack_below", this.CrackingBelowOnset);

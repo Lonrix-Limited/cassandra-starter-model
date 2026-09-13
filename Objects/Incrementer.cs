@@ -1,4 +1,4 @@
-using JCass_ModelCore.Models;
+﻿using JCass_ModelCore.Models;
 
 namespace StarterModel.Objects;
 
@@ -52,6 +52,12 @@ public class Incrementer
         // segment.SurfaceExpectedLife
 
         segment.SurfaceAge = segment.SurfaceAge + 1;
+
+        // The chipseal rut growth accumulator advances with it, but it is NOT the same clock. A
+        // resurfacing returns the surface age to zero and leaves this running, which is what makes
+        // chipseal rutting inherited by the new seal rather than renewed by it. Only a rehabilitation
+        // sends this back to zero. Asphalt never reads it.
+        segment.RutGrowthYears = segment.RutGrowthYears + 1;
 
         // Note: surface life achieved and surface remaining life are automatically calculated based on the surface age and expected life
 

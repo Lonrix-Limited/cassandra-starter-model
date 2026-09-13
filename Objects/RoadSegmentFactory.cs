@@ -1,4 +1,4 @@
-using JCass_ModelCore.Models;
+﻿using JCass_ModelCore.Models;
 
 namespace StarterModel.Objects;
 
@@ -237,6 +237,7 @@ public static class RoadSegmentFactory
         // segment becomes exactly average, the run completes, and nothing says so.
         segment.RutDeviate = numParamValues["par_rut_z"];
         segment.IriDeviate = numParamValues["par_iri_z"];
+        segment.RutGrowthYears = numParamValues["par_rut_growth_yrs"];
         segment.CrackOnsetPosition = numParamValues["par_crack_u_onset"];
         segment.CrackSeverityQuantile = numParamValues["par_crack_w_sev"];
         segment.CrackingBelowOnset = numParamValues["par_crack_below"];

@@ -1,4 +1,4 @@
-using JCass_ModelCore.Models;
+﻿using JCass_ModelCore.Models;
 
 
 namespace StarterModel.Objects;
@@ -32,6 +32,12 @@ public class Initialiser
         segment.PavementAge = GetPavementAge(segment);
         segment.SurfaceAge = GetSurfacingAge(segment);
 
+        // The chipseal rut growth accumulator starts at ZERO, not at the surface age. The chipseal
+        // level model has no age term, so exp(mu) already reproduces the rut as surveyed; seeding this
+        // from the surface age would add the same growth a second time and start the median chipseal
+        // segment 29% too high. Set before InitialiseRutting, which inverts against it.
+        segment.RutGrowthYears = 0.0;
+
         // Turn the surveyed condition into the segment's persistent random draws. Same order as the
         // Incrementer - cracking, then rutting, then roughness - because the rutting and roughness
         // inversions have to undo the cracking feedback term, which means cracking must already be set.
@@ -60,13 +66,15 @@ public class Initialiser
         // for a new pavement - but those are RESET values, and settling them is the Resetter's job.
         // Putting them in lookups.xlsx here would mean inventing the same lookup twice.
         //
-        // What is NOT missing any more, and this is a change from the previous note: a segment merely
-        // RESURFACED after its survey needs no correction for rutting or roughness. Neither resets on
-        // resurfacing under the new models - the rut lives in the pavement and the new surface inherits
-        // it, which is the same finding that explains why chipseal rutting shows no trend against
-        // surface age in this network's own data. Cracking does recompute on a resurfacing, and because
-        // onset is evaluated afresh from the surface age each period rather than latched, that happens
-        // on its own with no code here.
+        // A segment merely RESURFACED after its survey is the harder half, and the answer is split by
+        // surface class rather than being the same for both. CHIPSEAL rutting is inherited by a new
+        // seal, so a surveyed rut still describes the segment and needs no correction. ASPHALT rutting
+        // and roughness on both classes DO renew on a resurfacing - measured on this network, asphalt
+        // reads 2.13 mm of rut under surfaces up to six years old against 3.49 mm under surfaces over
+        // twenty, on pavements of the same age - so a survey taken before the last reseal overstates
+        // those, and year zero inverts the overstatement into the segment's persistent deviate where it
+        // stays for the whole run. Cracking needs nothing here: onset is evaluated afresh from the
+        // surface age every period rather than latched, so a resurfacing already handles itself.
         //
         // WHEN: once the Resetter class has been updated.
 

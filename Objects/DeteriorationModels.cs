@@ -1,4 +1,4 @@
-using JCass_ModelCore.Models;
+﻿using JCass_ModelCore.Models;
 
 namespace StarterModel.Objects;
 
@@ -220,9 +220,16 @@ public class DeteriorationModels
     /// placeholder on almost every chipseal segment. So the growth is an explicit annual amount, and
     /// it is JUDGEMENT rather than evidence - the single number here most likely to need revisiting.</para>
     ///
-    /// <para>That growth term uses the UNCAPPED surface age. Capping it would leave chipseal rutting
-    /// completely frozen past thirty years, because the chipseal fit has no age term of its own, and a
-    /// segment that never deteriorates again reads as a result rather than as a modelling limit.</para>
+    /// <para>THE GROWTH TERM DOES NOT RUN ON SURFACE AGE. It runs on RutGrowthYears, which starts at
+    /// zero at year zero and is left alone by a resurfacing. Driving it from the surface age instead
+    /// gets both ends wrong: at year zero it double-counts, because the chipseal level model has no age
+    /// term and already reproduces the surveyed rut, and at a reseal it collapses to nothing, which
+    /// would show a new seal removing rut that a chipseal in this network's data plainly inherits.</para>
+    ///
+    /// <para>Asphalt has no growth term at all - its rutting is a level model on surface age, and it
+    /// does reset on a resurfacing, which is the opposite of chipseal and is measured rather than
+    /// assumed: asphalt reads 2.13 mm of rut under surfaces up to six years old against 3.49 mm under
+    /// surfaces over twenty, on pavements of the same age, while chipseal reads 4.19 against 3.77.</para>
     /// </summary>
     public double GetRutting(RoadSegment segment, double surfaceAgeYears, double crackingPercent)
     {
@@ -232,10 +239,20 @@ public class DeteriorationModels
 
         if (segment.DeteriorationGroup == GroupChipSeal)
         {
-            rut += _constants.DetRutChipSealGrowthPerYear * Math.Max(0.0, surfaceAgeYears);
+            rut += this.ChipSealRutGrowth(segment);
         }
 
         return rut * (1.0 + _constants.DetFeedbackCrackOnRut * crackingPercent / 100.0);
+    }
+
+    /// <summary>
+    /// The accumulated chipseal rut growth, in mm. Zero for asphalt, and zero for any chipseal segment
+    /// in its first modelled period.
+    /// <para>One place so the forward model and the year-zero inversion cannot drift apart.</para>
+    /// </summary>
+    private double ChipSealRutGrowth(RoadSegment segment)
+    {
+        return _constants.DetRutChipSealGrowthPerYear * Math.Max(0.0, segment.RutGrowthYears);
     }
 
     /// <summary>
@@ -343,9 +360,15 @@ public class DeteriorationModels
     /// model reproduce the surveyed rut depth.
     /// <para>The inversion has to undo everything the forward model adds after the lognormal core, or
     /// the deviate absorbs it and year zero no longer matches the survey. For chipseal that means
-    /// removing the annual growth term, and for any segment it means removing the cracking feedback.
-    /// With the feedback coefficients at their default of zero the second step does nothing, but the
-    /// two must stay in step: change the forward model and this has to change with it.</para>
+    /// removing the accumulated growth term, and for any segment it means removing the cracking
+    /// feedback. With the feedback coefficients at their default of zero the second step does nothing,
+    /// but the two must stay in step: change the forward model and this has to change with it.</para>
+    ///
+    /// <para>At year zero the growth term is zero by construction, so the subtraction is a no-op there
+    /// and the inversion is the plain one the specification gives. It is kept because the two halves
+    /// must mirror each other for any later inversion - the post-rehabilitation reset among them - and
+    /// because a subtraction that quietly stopped matching the forward model would show up only as a
+    /// year-zero condition that no longer equals the survey.</para>
     /// </summary>
     public double InvertRutting(RoadSegment segment, double observedRut, double crackingPercent, out bool wasClamped)
     {
@@ -353,7 +376,7 @@ public class DeteriorationModels
 
         if (segment.DeteriorationGroup == GroupChipSeal)
         {
-            target -= _constants.DetRutChipSealGrowthPerYear * Math.Max(0.0, segment.SurfaceAge);
+            target -= this.ChipSealRutGrowth(segment);
         }
 
         return this.InvertLevelModel(target, this.RutMu(segment, segment.SurfaceAge), this.RutSigma(segment), out wasClamped);
