@@ -7,131 +7,74 @@ namespace StarterModel.Objects;
 /// </summary>
 public static class CalculationUtilities
 {
-
+        
     /// <summary>
-    /// Calculates a reset value based on the exceedance concept. If the value before treatment is below or equal to the exceedance threshold, 
-    /// it returns the value as is. If the value before treatment is greater than the exceedance threshold, it calculates a reset value by reducing 
-    /// the value by [the difference between the value before treatment and the exceedance threshold], multiplied with the improvement fraction.
-    /// </summary>
-    /// <param name="valueBeforeTreatment">Value before treatment is effected</param>
-    /// <param name="exceedanceThreshold">Exceedance threshold</param>
-    /// <param name="improvementFraction">Improvement fraction (value like 0.5, 0.8 etc)</param>
-    /// <returns>Value after treatment</returns>
-    public static double GetResetBasedOnExceedanceConcept(double valueBeforeTreatment, double exceedanceThreshold, double improvementFraction)
-    {
-        if (valueBeforeTreatment <= exceedanceThreshold)
-        {
-            return valueBeforeTreatment;
-        }
-        else
-        {
-            double resetValue = valueBeforeTreatment - (valueBeforeTreatment - exceedanceThreshold) * improvementFraction;
-            return resetValue;
-        }
-    }
-
-
-    /// <summary>
-    /// Utility function to calculate the Logit function on a value, where the function is
-    /// defined as 'Math.Exp(value) / (1 + Math.Exp(value))'
-    /// </summary>
-    /// <param name="value">Value on which to calculate logic</param>
-    /// <returns></returns>
-    public static double Logit(double value)
-    {
-        return Math.Exp(value) / (1 + Math.Exp(value));
-    }
-
-    /// <summary>
-    /// Calculates the Pavement Distress Index (PDI) for a road segment based on the current period. Short term includes maintenance and faults
+    /// Calculates the Pavement Distress Index (PDI) for a road segment based on the current period. Short term includes maintenance
     /// </summary>    
     /// <param name="currentPeriod">Current modelling period (e.g. 1,2,3...) used to determine whether we are in short or long term</param>
     /// <returns></returns>
     public static double GetPavementDistressIndex(RoadSegment segment, ModelBase frameworkModel, StarterModel roadModel, int currentPeriod)
     {
-        double boostedPotholes = segment.PctPotholes * roadModel.Constants.PotholeBoostFactor;
-        bool isShortTerm = currentPeriod <= roadModel.Constants.CSShortTermPeriod;
-        if (isShortTerm)
+        Constants constants = roadModel.Constants;
+        double basePDI = GetPavementDistressIndexBase(segment, constants);
+        bool isShortTerm = currentPeriod <= constants.CSShortTermPeriod;
+        if (isShortTerm && segment.TreatmentCount == 0)
         {
-            return GetPavementDistressIndexShortTerm(segment, frameworkModel, boostedPotholes);
+            // Only add maintenance penalties if we are in the short term period and the segment has not received any treatments yet, as per the model's design.
+            return basePDI + segment.MaintPotholeExtentLastYear * constants.PdiMaintPotholeFactor +
+                segment.MaintPavementExtentLastYear * constants.PdiMaintPavementFactor;
         }
         else
         {
-            return GetPavementDistressIndexLongTerm(segment, frameworkModel, boostedPotholes);
+            return basePDI;   //Do not consider historical maintenance beyond the short term period for PDI calculation, as per the model's design.
         }
     }
 
     /// <summary>
-    /// Calculates the Surface Distress Index (SDI) for a road segment based on the current period. Short term includes maintenance and faults
+    /// Calculates the Surface Distress Index (SDI) for a road segment based on the current period. Short term includes maintenance
     /// </summary>    
     /// <param name="currentPeriod">Current modelling period (e.g. 1,2,3,...) used to determine whether we are in short or long term</param>
     /// <returns></returns>
     public static double GetSurfacingDistressIndex(RoadSegment segment, ModelBase frameworkModel, StarterModel roadModel, int currentPeriod)
     {
-        double boostedPotholes = segment.PctPotholes * roadModel.Constants.PotholeBoostFactor;
-        bool isShortTerm = currentPeriod <= roadModel.Constants.CSShortTermPeriod;
-        if (isShortTerm)
+        Constants constants = roadModel.Constants;
+        double baseSDI = GetSurfacingDistressIndexBase(segment);
+        bool isShortTerm = currentPeriod <= constants.CSShortTermPeriod;
+        if (isShortTerm && segment.TreatmentCount == 0)
         {
-            return GetSurfacingDistressIndexShortTerm(segment, frameworkModel, boostedPotholes);
+            // Only add maintenance penalties if we are in the short term period and the segment has not received any treatments yet, as per the model's design.
+            return baseSDI + segment.MaintPotholeExtentLastYear * constants.SdiMaintPotholeFactor +
+                segment.MaintSurfacingExtentLastYear * constants.SdiMaintSurfacingFactor;
         }
         else
         {
-            return GetSurfacingDistressIndexLongTerm(segment, frameworkModel, boostedPotholes);
+            return baseSDI;   //Do not consider historical maintenance beyond the short term period for SDI calculation, as per the model's design.
         }
     }
 
+    
     /// <summary>
-    /// Calcuates the Pavement Distress Index (PDI) for a road segment based. Short term includes maintenance and faults 
-    /// percentage.
-    /// </summary>
-    /// <param name="segment"></param>
-    /// <param name="frameworkModel"></param>    
-    private static double GetPavementDistressIndexShortTerm(RoadSegment segment, ModelBase frameworkModel, double boostedPotholes)
-    {     
-        double value = 0.2 * segment.PctLongTransCracks 
-            + segment.PctMeshCracks 
-            + segment.PctShoving 
-            + boostedPotholes 
-            + segment.FaultsAndMaintenancePavementPercent;
-
-        return value;            
-    }
-
-    /// <summary>
-    /// Calculates the Pavement Distress Index (PDI) for a road segment based on long-term distress measures. Long term 
-    /// currently also includes maintenance and faults to prevent a sudden drop in PDI after the short term period is over.
-    /// TODO: To discuss the inclusion of maintenance and faults in the long term PDI.
+    /// Calculates the Pavement Distress Index (PDI) for a road segment.
     /// </summary>    
-    private static double GetPavementDistressIndexLongTerm(RoadSegment segment, ModelBase frameworkModel, double boostedPotholes)
-    {        
-        double value = 0.2 * segment.PctLongTransCracks
-            + segment.PctMeshCracks
-            + segment.PctShoving
-            + boostedPotholes
-            + segment.FaultsAndMaintenancePavementPercent;
-
-        return value;
-    }
-
-    /// <summary>
-    /// Calculates the Surface Distress Index (SDI) for a road segment based on short-term distress measures. Short term includes maintenance and faults 
-    /// percentage.
-    /// </summary>    
-    private static double GetSurfacingDistressIndexShortTerm(RoadSegment segment, ModelBase frameworkModel, double boostedPotholes)
-    {        
-        
-        double value = segment.PctFlushing + segment.PctScabbing + 0.5*segment.PctLongTransCracks + boostedPotholes + segment.FaultsAndMaintenanceSurfacingPercent;        
-        return value;
-    }
-
-    /// <summary>
-    /// Calculates the Surface Distress Index (PDI) for a road segment based on long-term distress measures. Long term 
-    /// currently also includes maintenance and faults to prevent a sudden drop in PDI after the short term period is over.
-    /// TODO: To discuss the inclusion of maintenance and faults in the long term PDI.
-    /// </summary>  
-    private static double GetSurfacingDistressIndexLongTerm(RoadSegment segment, ModelBase frameworkModel, double boostedPotholes)
+    private static double GetPavementDistressIndexBase(RoadSegment segment, Constants constants)
     {
-        double value = segment.PctFlushing + segment.PctScabbing + 0.5 * segment.PctLongTransCracks + boostedPotholes + segment.FaultsAndMaintenanceSurfacingPercent;
+        // Rutting only counts above a dead band, and then disproportionately. Both numbers are the
+        // engineer's and live in the 'distress_index' lookup set - see Constants for what each does.
+        double rutExcess = Math.Max(0, segment.RutParameterValue - constants.PdiRutExcessThresholdMm);
+        double rutPenalty = Math.Pow(rutExcess, constants.PdiRutPenaltyExponent);
+        double value = segment.PctCracking + rutPenalty;
+
+        return value;
+    }
+
+
+
+    /// <summary>
+    /// Calculates the Surface Distress Index (SDI) for a road segment.
+    /// </summary>  
+    private static double GetSurfacingDistressIndexBase(RoadSegment segment)
+    {
+        double value = segment.PctFlushing + segment.PctRavelling + segment.PctCracking;
         return value;
     }
 

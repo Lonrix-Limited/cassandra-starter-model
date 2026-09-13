@@ -880,48 +880,7 @@ public class RoadSegment
 
 
     #endregion
-
-    #region Maintenance Cost
-
-    private double _maintenanceCostPerKm;
-
-    /// <summary>
-    /// Maintenance Cost per Km
-    /// </summary>
-    public double MaintenanceCostPerKm { get { return _maintenanceCostPerKm; } }
-
-    private double GetMaintenanceCostPerKm(ModelBase frameworkModel, StarterModel domainModel, int currentPeriod)
-    {
-        if (this.SurfaceIsChipSealOrACFlag == 0)
-        {
-            // If the surface is not chip seal or asphalt concrete, return 0.0
-            return 0.0;
-        }
-
-        if (PavementDistressIndex < domainModel.Constants.MaintenanceCostPDIThreshold)
-        {
-            // If the PDI is below the minimum threshold, return 0.0
-            return 0.0;
-        }
-
-        // 0.0122 * para_naasra + 0.055 * ln(post_maintpred_shove) + 0.048 * ln(post_maintpred_mesh) + 0.243 * ln(para_adt) + 0.644 * ln(para_rut) + 0.01 * para_pave_age +
-        // 0.03 * ln(post_maintpred_poth) + 5.227
-        double preFactor = 0.0122 * this.Naasra85 +
-                           0.055 * Math.Log(Math.Max(this.PctShoving, 0.001)) + 
-                           0.048 * Math.Log(Math.Max(this.PctMeshCracks, 0.001)) + 
-                           0.243 * Math.Log(Math.Max(this.AverageDailyTraffic, 0.001)) + 
-                           0.644 * Math.Log(Math.Max(this.RutParameterValue, 0.001)) +
-                           0.01 * this.PavementAge +
-                           0.03 * Math.Log(Math.Max(this.PctPotholes, 0.001)) + 
-                           5.227;
-
-        double calibrationFactor = domainModel.Constants.MaintenanceCostCalibrationFactor;        
-        return (calibrationFactor * Math.Exp(preFactor));
-        
-    }
-
-    #endregion
-
+    
     #region Treatment and Candidate Selection Related
 
     private bool _isTreated = false;
@@ -982,19 +941,7 @@ public class RoadSegment
         // PDI and SDI
         _pavementDistressIndex = this.GetPavementDistressIndex(frameworkModel, domainModel, currentPeriod);
         _surfaceDistressIndex = this.GetSurfaceDistressIndex(frameworkModel, domainModel, currentPeriod);
-
-        // Sub-Parameters for Objective Values
-        _objectiveDistressIndex = this.GetObjectiveDistress(frameworkModel, domainModel, currentPeriod);
-        _objectiveRemainingSurfaceLife = this.GetObjectiveRemainingSurfaceLife(frameworkModel, domainModel);
-        _objectiveRutting = this.GetObjectiveRutting(frameworkModel, domainModel);
-        _objectiveNaasra = this.GetObjectiveNaasra(frameworkModel, domainModel);
-        _objectiveValueRaw = this.GetObjectiveValueRaw(frameworkModel, domainModel, currentPeriod);
-        _objectiveValue = this.GetObjectiveValue(frameworkModel, domainModel, currentPeriod);
-        _objectiveAreaUnderCurve = this.GetObjectiveAreaUnderCurve(frameworkModel, domainModel, currentPeriod);
-
-        // Maintenance Cost
-        _maintenanceCostPerKm = this.GetMaintenanceCostPerKm(frameworkModel, domainModel, currentPeriod);
-
+                
         this.UpdateCandidateSelectionResult(frameworkModel, domainModel, currentPeriod, specialPlaceholders);
     }
 
@@ -1017,8 +964,7 @@ public class RoadSegment
         _objectiveNaasra = numParamValues["para_obj_naasra"]; 
         _objectiveValueRaw = numParamValues["para_obj_o"];
         _objectiveValue = numParamValues["para_obj"];
-        _objectiveAreaUnderCurve = numParamValues["para_obj_auc"];
-        _maintenanceCostPerKm = numParamValues["para_maint_cost_perkm"]; 
+        _objectiveAreaUnderCurve = numParamValues["para_obj_auc"];        
         _candidateSelectionInfo = textParamValues["para_csl_status"]; 
         _isCandidateForTreatment = Convert.ToInt32(numParamValues["para_csl_flag"]); 
     }
@@ -1035,112 +981,6 @@ public class RoadSegment
         return CalculationUtilities.GetSurfacingDistressIndex(this, frameworkModel, domainModel, currentPeriod);
     }
 
-
-    /// <summary>
-    /// BCA objective distress condition placed on scaling curve (part 2 of 3)
-    /// </summary>
-    /// <param name="currentPeriod">Current modelling period (1,2,3, etc) used to determine PDI and SDI (need to know long or short term)</param>
-    private double GetObjectiveDistress(ModelBase frameworkModel, StarterModel domainModel, int currentPeriod)
-    {
-        double pdi = this.GetPavementDistressIndex(frameworkModel, domainModel, currentPeriod);
-        double sdi = this.GetSurfaceDistressIndex(frameworkModel, domainModel, currentPeriod);
-        double objectiveDistressPre1 = 0.7 * pdi + 0.3 * sdi;
-
-        //0.4 * post_obj_distress_pre1 + -4
-        double objectiveDistressPre = 0.4 * objectiveDistressPre1 - 4.0;
-        double objectiveDistress = 100 * CalculationUtilities.Logit(objectiveDistressPre);
-
-        return objectiveDistress;
-    }
-
-    /// <summary>
-    /// BCA objective remaining surface life on scaling curve (part 1 of 3)
-    /// </summary>    
-    private double GetObjectiveRemainingSurfaceLife(ModelBase frameworkModel, StarterModel domainModel)
-    {
-        //-0.5 * para_surf_remain_life + -2.5
-        double rslPre = -0.5 * this.SurfaceRemainingLife - 2.5;
-
-        //100 * logit(post_obj_rsl_pre)
-        double objectiveRemainingSurfaceLife = 100 * CalculationUtilities.Logit(rslPre);
-        return objectiveRemainingSurfaceLife;
-    }
-
-    /// <summary>
-    /// BCA objective rutting on scaling curve (part 3 of 3)
-    /// </summary>    
-    private double GetObjectiveRutting(ModelBase frameworkModel, StarterModel domainModel)
-    {
-        //TODO: This does not distinguish between preserve and holding like MCDA does. Can be fixed.
-        double rutExceedanceThreshold = frameworkModel.GetLookupValueNumber("reset_exceed_thresh_rut", "preserve");
-        double objRutPre1 = this.RutParameterValue - rutExceedanceThreshold;
-        //0.55 * post_obj_rutting_pre1 + -1.65
-        double objRutPre = 0.55 * objRutPre1 - 1.65;
-
-        //100 * logit(post_obj_rutting_pre)
-        double objectiveRutting = 100 * CalculationUtilities.Logit(objRutPre);
-
-        return objectiveRutting;
-    }
-
-    /// <summary>
-    /// BCA objective roughness on scaling curve (part 3 of 3)
-    /// </summary>    
-    private double GetObjectiveNaasra(ModelBase frameworkModel, StarterModel domainModel)
-    {
-        double naasraExceedanceThreshold = frameworkModel.GetLookupValueNumber("reset_exceed_thresh_naasra", this.SurfaceRoadType);
-        double objNaasraPre1 = this.Naasra85 - naasraExceedanceThreshold;
-
-        //0.044 * post_obj_naasra_pre1 + -1.76
-        double objNaasraPre = 0.044 * objNaasraPre1 - 1.76;
-
-        //100 * logit(post_obj_naasra_pre)
-        double objectiveNaasra = 100 * CalculationUtilities.Logit(objNaasraPre);
-        return objectiveNaasra;
-
-    }
-
-    /// <summary>
-    /// BCA objective raw value, based on weighted sum of the objective components
-    /// </summary>    
-    /// <param name="currentPeriod">Current modelling period (1,2,3, etc) used to determine PDI and SDI (need to know long or short term)</param>    
-    private double GetObjectiveValueRaw(ModelBase frameworkModel, StarterModel domainModel, int currentPeriod)
-    {
-        double objDistress = this.GetObjectiveDistress(frameworkModel, domainModel, currentPeriod);
-        double objRutting = this.GetObjectiveRutting(frameworkModel, domainModel);
-        double objNaasra = this.GetObjectiveNaasra(frameworkModel, domainModel);
-        double objRemainingSurfaceLife = this.GetObjectiveRemainingSurfaceLife(frameworkModel, domainModel);
-
-        double objectiveO = 0.3 * objDistress +
-                            0.2 * objRemainingSurfaceLife +
-                            0.25 * objRutting +
-                            0.25 * objNaasra;
-        return objectiveO;
-    }
-
-    /// <summary>
-    /// BCA objective value weighted by Road Type
-    /// </summary>
-    /// <param name="currentPeriod">Current modelling period (1,2,3, etc) used to determine PDI and SDI (need to know long or short term)</param>    
-    private double GetObjectiveValue(ModelBase frameworkModel, StarterModel domainModel, int currentPeriod)
-    {
-        double objConst = 30;
-        double objWeighting = frameworkModel.GetLookupValueNumber("bca_weighting", this.RoadType);
-        //post_obj_o * post_obj_weighting + post_obj_c * 1min(post_obj_weighting)
-        double objectiveO = this.GetObjectiveValueRaw(frameworkModel, domainModel, currentPeriod) * objWeighting + objConst * (1 - objWeighting);
-        return objectiveO;
-    }
-
-    /// <summary>
-    /// Goes to BCA objective (menu in Model Configuration), this is the BCA objective scaled by multiplying with treatment area to normalise the cost, 
-    /// to use for AUC calculation in BCA model
-    /// </summary>
-    /// <param name="currentPeriod">Current modelling period (1,2,3, etc) used to determine PDI and SDI (need to know long or short term)</param>    
-    private double GetObjectiveAreaUnderCurve(ModelBase frameworkModel, StarterModel domainModel, int currentPeriod)
-    {
-        double objectiveValue = this.GetObjectiveValue(frameworkModel, domainModel, currentPeriod);
-        return objectiveValue * this.AreaSquareMetre; // Scale by area
-    }
 
     /// <summary>
     /// Updates the sinks mapping back to parameter values in the model. 

@@ -17,11 +17,6 @@ public class Constants
     private double _min_pdi_to_treat;
 
 
-    private double _potholeBoostFactor;
-
-    private double _maintenanceCostCalibrationFactor;
-    private double _maintenanceCostPDIThreshold;
-
     // Related to TSS (Treatment Suitability Scores - MCDA)
     private double _rehabExcessRutThresh;
     private double _rehabExcessRutFact;
@@ -70,6 +65,13 @@ public class Constants
     private double _preRepairMaxExtentIri;
     private double _preRepairRetainedFraction;
     private double _preRepairGuardFactor;
+
+    private double _pdiMaintPavementFactor;
+    private double _pdiMaintPotholeFactor;
+    private double _pdiRutExcessThresholdMm;
+    private double _pdiRutPenaltyExponent;
+    private double _sdiMaintSurfacingFactor;
+    private double _sdiMaintPotholeFactor;
 
     private Dictionary<string, object> _surfaceClassGroups = new Dictionary<string, object>();
 
@@ -142,30 +144,6 @@ public class Constants
     
     #endregion
 
-    /// <summary>
-    /// Boosting factor for pothole area to bring it to scale with other distresses
-    /// </summary>
-    public double PotholeBoostFactor
-    {
-        get { return _potholeBoostFactor; }
-    }
-
-    /// <summary>
-    /// Calibration factor for maintenance cost
-    /// TODO: Discussion with D&K
-    /// </summary>
-    public double MaintenanceCostCalibrationFactor
-    {
-        get { return _maintenanceCostCalibrationFactor; }     
-    }
-
-    /// <summary>
-    /// Maintenance PDI threshold (force maintenance cost to zero if PDI is below this value)
-    /// </summary>
-    public double MaintenanceCostPDIThreshold
-    {
-        get { return _maintenanceCostPDIThreshold; }     
-    }
 
     /// <summary>
     /// Rut threshold above which a penalty(for Holding Actions) or boost(for Rehabs) is applied(see below)
@@ -551,6 +529,73 @@ public class Constants
     public double PreRepairGuardFactor { get { return _preRepairGuardFactor; } }
 
     /// <summary>
+    /// How heavily recorded PAVEMENT maintenance counts towards the Pavement Distress Index, in PDI
+    /// points per unit of extent. JUDGEMENT.
+    /// <para>The maintenance extent inputs run 0 to 1, so this value IS the penalty a segment picks up
+    /// when every sub-segment had pavement maintenance recorded in the last year. It stands in for
+    /// distress the condition survey never saw: a segment somebody has been patching is in worse shape
+    /// than its measured cracking and rut admit. Set it to 0 to leave maintenance history out of PDI
+    /// entirely.</para>
+    /// <para>Applied only in the short term, and only until the segment's first modelled treatment -
+    /// after either of those the record describes a road that no longer exists.</para>
+    /// </summary>
+    public double PdiMaintPavementFactor { get { return _pdiMaintPavementFactor; } }
+
+    /// <summary>
+    /// How heavily recorded POTHOLE maintenance counts towards the Pavement Distress Index, in PDI
+    /// points per unit of extent. JUDGEMENT.
+    /// <para>Separate from the pavement maintenance factor because potholes are recorded independently
+    /// and say something different: a pothole is a failure through the surface rather than general
+    /// pavement weakness. Note that the shipped value is LOWER than the pothole factor used for SDI, so
+    /// as delivered a pothole history counts more against the surface than against the pavement. That
+    /// asymmetry is a judgement, not a derivation - revisit both together.</para>
+    /// </summary>
+    public double PdiMaintPotholeFactor { get { return _pdiMaintPotholeFactor; } }
+
+    /// <summary>
+    /// Rut depth in mm above which rutting begins to contribute to the Pavement Distress Index.
+    /// JUDGEMENT.
+    /// <para>A deliberate dead band. Below this depth a segment contributes nothing from rut at all and
+    /// its PDI is cracking alone, because shallow rutting is ordinary wear and should not make a segment
+    /// read as distressed. Rutting is the only structural distress the fitted models carry, so this
+    /// threshold and the exponent below are what decide how much PDI is a pavement index rather than a
+    /// cracking index.</para>
+    /// <para>PROVISIONAL. It entered the model as an example value and has never been calibrated against
+    /// the network's own rut distribution.</para>
+    /// </summary>
+    public double PdiRutExcessThresholdMm { get { return _pdiRutExcessThresholdMm; } }
+
+    /// <summary>
+    /// Exponent applied to rut depth in excess of the threshold when forming the Pavement Distress
+    /// Index. JUDGEMENT.
+    /// <para>Above one it makes deep rutting count disproportionately, which is the intent - a segment
+    /// at twice the threshold is far worse than twice as bad. At the shipped 7.0 mm threshold and 1.8
+    /// exponent, 10 mm of rut adds about 7 PDI points and 15 mm adds about 42. Set it to 1.0 for a
+    /// straight linear penalty.</para>
+    /// <para>PROVISIONAL, as with the threshold above. Change the two together: the exponent's effect is
+    /// meaningless without knowing where counting starts.</para>
+    /// </summary>
+    public double PdiRutPenaltyExponent { get { return _pdiRutPenaltyExponent; } }
+
+    /// <summary>
+    /// How heavily recorded SURFACING maintenance counts towards the Surface Distress Index, in SDI
+    /// points per unit of extent. JUDGEMENT.
+    /// <para>The surfacing counterpart of the pavement factor above, and it reads the surfacing extent
+    /// input rather than the pavement one. Same 0 to 1 extent scale, same short-term and
+    /// first-treatment limits.</para>
+    /// </summary>
+    public double SdiMaintSurfacingFactor { get { return _sdiMaintSurfacingFactor; } }
+
+    /// <summary>
+    /// How heavily recorded POTHOLE maintenance counts towards the Surface Distress Index, in SDI points
+    /// per unit of extent. JUDGEMENT.
+    /// <para>Reads the same pothole extent input as the PDI factor, weighted separately because the same
+    /// history means different things for a surface and for a pavement. See the PDI pothole factor for
+    /// the asymmetry between the two as delivered.</para>
+    /// </summary>
+    public double SdiMaintPotholeFactor { get { return _sdiMaintPotholeFactor; } }
+
+    /// <summary>
     /// Time constant in years over which the non-permanent part of a pre-repair's benefit decays away,
     /// for this deterioration group. JUDGEMENT.
     /// <para>Close to cosmetic for a thirty year budget - it changes the apparent rate in the first few
@@ -592,6 +637,7 @@ public class Constants
     private const string RehabOffsetSet = "rehab_offsets";
     private const string StaleSurveyResurfacingSet = "stale_survey_resurf";
     private const string PreRepairSet = "pre_repair";
+    private const string DistressIndexSet = "distress_index";
     private const string DefaultKey = "default";
 
     /// <summary>
@@ -640,11 +686,7 @@ public class Constants
         _min_pdi_to_treat = Convert.ToDouble(lookupSets["candidate_selection"]["min_pdi_to_treat"]);
         _minSlaToTreatAc = Convert.ToDouble(lookupSets["candidate_selection"]["min_sla_to_treat_ac"]);
         _minSlaToTreatCs = Convert.ToDouble(lookupSets["candidate_selection"]["min_sla_to_treat_cs"]);
-        
-        _potholeBoostFactor = Convert.ToDouble(lookupSets["distress"]["poth_booster"]);
 
-        _maintenanceCostCalibrationFactor = Convert.ToDouble(lookupSets["maint_pred"]["cal_maint_pred"]);
-        _maintenanceCostPDIThreshold = Convert.ToDouble(lookupSets["maint_pred"]["maint_pdi_threshold"]);
 
         // Related to TSS
         _rehabExcessRutThresh = Convert.ToDouble(lookupSets["treatment_suitability_scores"]["rehab_excess_rut_thresh"]);
@@ -700,6 +742,13 @@ public class Constants
         _preRepairMaxExtentIri = GetNumber(lookupSets, PreRepairSet, "max_extent_iri");
         _preRepairRetainedFraction = GetNumber(lookupSets, PreRepairSet, "retained_fraction");
         _preRepairGuardFactor = GetNumber(lookupSets, PreRepairSet, "guard_factor");
+
+        _pdiMaintPavementFactor = GetNumber(lookupSets, DistressIndexSet, "pdi_maint_pave_factor");
+        _pdiMaintPotholeFactor = GetNumber(lookupSets, DistressIndexSet, "pdi_maint_poth_factor");
+        _pdiRutExcessThresholdMm = GetNumber(lookupSets, DistressIndexSet, "pdi_rut_excess_thresh_mm");
+        _pdiRutPenaltyExponent = GetNumber(lookupSets, DistressIndexSet, "pdi_rut_penalty_exponent");
+        _sdiMaintSurfacingFactor = GetNumber(lookupSets, DistressIndexSet, "sdi_maint_surf_factor");
+        _sdiMaintPotholeFactor = GetNumber(lookupSets, DistressIndexSet, "sdi_maint_poth_factor");
 
         foreach (string group in DeteriorationModels.ModelGroups)
         {

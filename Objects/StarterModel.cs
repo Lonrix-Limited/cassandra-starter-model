@@ -223,11 +223,9 @@ public class StarterModel : DomainModelBase
     {
         try
         {
-            Dictionary<string, object> infoFromModel = model.GetSpecialPlaceholderValues(iElemIndex, iPeriod, null);
-            RoadSegment segment = RoadSegmentFactory.GetFromModel(this.model, this, numInputs, textInputs, numModParamValues, textModParamValues, iElemIndex, iPeriod);
-            segment.UpdateFormulaValues(this.model, this, iPeriod, infoFromModel);  //Immediately update the formula values for the segment
-
-            return RoutineMaintenance.GetRoutineMaintenance(segment, iPeriod, model.Lookups);
+            // No Routine maintenance is modelled in this domain model. Return an empty treatment instance (null).
+            // If you want to model routine maintenance, you can implement your own logic here to determine if routine maintenance is triggered for the current element and period.
+            return null!;
 
         }
         catch (Exception ex)
