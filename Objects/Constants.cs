@@ -72,6 +72,7 @@ public class Constants
     private Dictionary<string, double> _rehabResetDeflection = new Dictionary<string, double>();
     private Dictionary<string, double> _rehabOffsetRut = new Dictionary<string, double>();
     private Dictionary<string, double> _rehabOffsetIri = new Dictionary<string, double>();
+    private Dictionary<string, double> _rehabOffsetCrackOnset = new Dictionary<string, double>();
     private Dictionary<string, double> _staleSurveyResurfacingRut = new Dictionary<string, double>();
     private Dictionary<string, double> _staleSurveyResurfacingIri = new Dictionary<string, double>();
 
@@ -437,6 +438,26 @@ public class Constants
     }
 
     /// <summary>
+    /// Permanent offset added to the cracking ONSET model, in log-odds, for the rest of a rehabilitated
+    /// segment's life. ZERO by default, which is the behaviour as delivered.
+    ///
+    /// <para>THIS ONE IS NOT DERIVED, AND THAT IS WHY IT DEFAULTS TO OFF. The four level-model offsets
+    /// follow from the as-new condition the engineer set - 2.0 mm of rut, IRI 2.5 - and there is no
+    /// as-new CRACKING level to derive a fifth from, because cracking has no as-new value: a new road
+    /// has none. So this is pure engineering judgement and belongs to the engineer, not to the code.</para>
+    ///
+    /// <para>WHAT IT IS FOR. At zero, 40% of rebuilt asphalt segments and 26% of rebuilt chipseal are
+    /// cracked again one year after reconstruction. That is the fitted onset model doing what it was
+    /// fitted to do - it was built on surfacings over sixty-year-old pavements, where reflective
+    /// cracking comes through fast - and it is too fast for a road that has just been rebuilt. A
+    /// negative value here delays it. The lookup comment carries the figures for a range of values.</para>
+    /// </summary>
+    public double GetRehabOffsetCrackOnset(string deteriorationGroup)
+    {
+        return GetForGroup(_rehabOffsetCrackOnset, deteriorationGroup, RehabOffsetSet, "crack_onset");
+    }
+
+    /// <summary>
     /// Factor applied to a surveyed rut depth when the segment was RESURFACED after that survey, so
     /// that year zero describes the surface the segment actually has.
     /// <para>The chipseal factor is 1.0 on purpose - a seal follows the shape of what it is laid on and
@@ -593,6 +614,7 @@ public class Constants
             _rehabResetDeflection[group] = GetNumber(lookupSets, RehabResetSet, $"d0_{group}");
             _rehabOffsetRut[group] = GetNumber(lookupSets, RehabOffsetSet, $"rut_{group}");
             _rehabOffsetIri[group] = GetNumber(lookupSets, RehabOffsetSet, $"iri_{group}");
+            _rehabOffsetCrackOnset[group] = GetNumber(lookupSets, RehabOffsetSet, $"crack_onset_{group}");
             _staleSurveyResurfacingRut[group] = GetNumber(lookupSets, StaleSurveyResurfacingSet, $"rut_{group}");
             _staleSurveyResurfacingIri[group] = GetNumber(lookupSets, StaleSurveyResurfacingSet, $"iri_{group}");
         }

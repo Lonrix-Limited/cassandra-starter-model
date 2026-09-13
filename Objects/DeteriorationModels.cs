@@ -92,16 +92,37 @@ public class DeteriorationModels
     #region Cracking - the three part model
 
     /// <summary>
-    /// Probability that the segment has started cracking at the given surface age (Part A).
+    /// Probability that the segment has started cracking at the given surface age (Part A), including
+    /// the rehabilitation offset where the segment has been rebuilt.
+    ///
+    /// <para>ADDED HERE, IN ONE PLACE, for the same reason as in the two level models: every use of the
+    /// onset probability reads this method - the year-on-year comparison, the year-zero inversion and
+    /// the draw the Resetter makes after a treatment - so an offset added at a call site would put the
+    /// draw and the comparison that reads it back out of step, and a segment would be handed a position
+    /// that contradicts the probability it is tested against.</para>
+    ///
+    /// <para>The offset is ZERO unless the engineer sets it. Unlike the four level-model offsets it is
+    /// not derived from anything, because cracking has no as-new value to derive it from.</para>
     /// </summary>
     public double CrackOnsetProbability(RoadSegment segment, double surfaceAgeYears)
     {
         FittedModel model = this.ModelFor(_coefficients.CrackOnset, segment, "cracking onset");
         double eta = model.LinearPredictor(this.LogAge(surfaceAgeYears), LogTraffic(segment.SurveyedAverageDailyTraffic),
                                            segment.CentralDeflection, segment.HeavyVehiclePercentage);
+        eta += this.RehabilitationOffsetCrackOnset(segment);
 
         // Numerically stable inverse logit: the naive form overflows for a large negative eta.
         return eta >= 0.0 ? 1.0 / (1.0 + Math.Exp(-eta)) : Math.Exp(eta) / (1.0 + Math.Exp(eta));
+    }
+
+    /// <summary>
+    /// The log-odds offset a rehabilitated segment carries in the cracking onset model, and zero for
+    /// every segment that has not been rebuilt. Zero by default for a rebuilt one too - see the Constants
+    /// property for why this offset is the engineer's to set rather than one derived here.
+    /// </summary>
+    private double RehabilitationOffsetCrackOnset(RoadSegment segment)
+    {
+        return segment.HasBeenRehabilitated ? _constants.GetRehabOffsetCrackOnset(segment.DeteriorationGroup) : 0.0;
     }
 
     /// <summary>
