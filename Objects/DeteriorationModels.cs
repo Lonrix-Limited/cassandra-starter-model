@@ -707,7 +707,7 @@ public class DeteriorationModels
         // no part in producing, so the floor test below is comparing the wrong number and the
         // arithmetic under it - which inverts the severity formula - is not inverting the value it has
         // been handed. It can come back LARGER than the credit it was asked to cap: an asphalt segment
-        // 45% cracked at surface age 15 and overlaid with ThinAC_H, whose surface age therefore returns
+        // 45% cracked at surface age 15 and overlaid with ac_holding, whose surface age therefore returns
         // to zero and whose onset position no longer produces onset, has its credit raised from 0.52 to
         // 0.83 deviate units against a 2.5% floor - a permanent discount it carries into every later
         // period in which it does cross the threshold. Skipping the check here is the same rule that

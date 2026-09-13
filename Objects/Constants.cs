@@ -521,9 +521,9 @@ public class Constants
     /// A pre-repair may not leave a segment better than this multiple of the rehabilitation reset
     /// value for the same quantity. JUDGEMENT.
     /// <para>WHY IT IS NEEDED. A pre-repair combined with an asphalt overlay in the same year - the
-    /// ThinAC_H treatment - resets the clock AND credits the deviate, so its year zero is already
-    /// close to a rehabilitation. Without this floor the two could compound to a condition better than
-    /// a full rebuild, which is nonsense. What still separates them legitimately is that a pre-repair
+    /// ac_holding treatment, and ogpa_holding with it - resets the clock AND credits the deviate, so
+    /// its year zero is already close to a rehabilitation. Without this floor the two could compound to
+    /// a condition better than a full rebuild, which is nonsense. What still separates them legitimately is that a pre-repair
     /// leaves the deflection alone and earns no as-new offset.</para>
     /// </summary>
     public double PreRepairGuardFactor { get { return _preRepairGuardFactor; } }
@@ -627,6 +627,83 @@ public class Constants
 
     #endregion
 
+    #region Treatment unit rates
+
+    // THESE SETS ARE KEPT WHOLE RATHER THAN UNPACKED INTO PROPERTIES, so that adding a treatment needs
+    // a row in lookups.xlsx and a constant in TreatmentNames - and nothing at all in this file. They
+    // are fetched once at setup, so a missing SET stops the run there; a missing KEY can only be
+    // caught when a segment asks for it, which is what the guards in the two readers below are for.
+    //
+    // All four live on the 'lkp_unit_rates' sheet, and that sheet name is load-bearing in a way no
+    // other lkp_ sheet name is: the web app's Tuning page has a Treatment Rates tab that reads exactly
+    // that sheet, by name. A rate on any other sheet still loads and still costs correctly, but the
+    // modeller cannot find it on the page they were told to edit it on.
+
+    /// <summary>One rate per treatment name, for every treatment except the rehabilitations.</summary>
+    private Dictionary<string, object> _unitRates = new Dictionary<string, object>();
+
+    /// <summary>
+    /// Rehabilitation rates, one set per surfacing family, each keyed by ONRC category rather than by
+    /// treatment name. A rehabilitation costs what the road class says it costs, which is why these
+    /// three could not stay in the flat per-treatment set.
+    /// </summary>
+    private Dictionary<string, Dictionary<string, object>> _rehabRatesByTreatment =
+        new Dictionary<string, Dictionary<string, object>>();
+
+    /// <summary>
+    /// The unit rate for a treatment, in dollars per square metre.
+    /// <para>Not for the rehabilitations - they are keyed by ONRC category and go through
+    /// <see cref="GetRehabUnitRate"/>. Not for the holding treatments either: their rate in
+    /// lookups.xlsx is the sentinel 'N/A' because their cost is carried in the quantity, so reading it
+    /// as a number would throw.</para>
+    /// </summary>
+    /// <param name="treatmentName">A constant from <see cref="TreatmentNames"/>.</param>
+    public double GetUnitRate(string treatmentName)
+    {
+        if (!_unitRates.ContainsKey(treatmentName))
+        {
+            throw new Exception($"Unit rate for treatment '{treatmentName}' not found in lookup set " +
+                                $"'{UnitRatesSet}' on the 'lkp_unit_rates' sheet of lookups.xlsx.");
+        }
+
+        // Convert, never cast: setting_value arrives as text whatever the cell looks like in Excel.
+        return Convert.ToDouble(_unitRates[treatmentName]);
+    }
+
+    /// <summary>
+    /// The unit rate for a rehabilitation, in dollars per square metre, for this segment's ONRC
+    /// category.
+    /// <para>Falls back to the set's 'default' key for an ONRC category the engineer has not priced,
+    /// rather than stopping the run - the same arrangement as the 'road_class' set, and for the same
+    /// reason: a category nobody anticipated should not end a thirty year forecast.</para>
+    /// </summary>
+    /// <param name="treatmentName">One of the three rehabilitation constants in <see cref="TreatmentNames"/>.</param>
+    /// <param name="onrc">The segment's ONRC category, lower case.</param>
+    public double GetRehabUnitRate(string treatmentName, string onrc)
+    {
+        if (!_rehabRatesByTreatment.ContainsKey(treatmentName))
+        {
+            throw new Exception($"'{treatmentName}' is not a rehabilitation, so it has no ONRC-keyed " +
+                                $"rate set. Use GetUnitRate for it instead.");
+        }
+
+        Dictionary<string, object> rates = _rehabRatesByTreatment[treatmentName];
+        string key = onrc ?? string.Empty;
+
+        if (rates.ContainsKey(key)) return Convert.ToDouble(rates[key]);
+
+        if (!rates.ContainsKey(DefaultKey))
+        {
+            throw new Exception($"The rehabilitation rate set for '{treatmentName}' in lookups.xlsx has " +
+                                $"no entry for ONRC category '{onrc}' and no '{DefaultKey}' key to fall " +
+                                $"back on. Add one or the other.");
+        }
+
+        return Convert.ToDouble(rates[DefaultKey]);
+    }
+
+    #endregion
+
     #region Guarded lookup readers
 
     private const string DeteriorationSet = "deterioration";
@@ -638,6 +715,13 @@ public class Constants
     private const string StaleSurveyResurfacingSet = "stale_survey_resurf";
     private const string PreRepairSet = "pre_repair";
     private const string DistressIndexSet = "distress_index";
+
+    // The four sets on the 'lkp_unit_rates' sheet. See the Treatment unit rates region above.
+    private const string UnitRatesSet = "unit_rates_general";
+    private const string ChipsealRehabRateSet = "cs_rehab_rate";
+    private const string AsphaltRehabRateSet = "ac_rehab_rate";
+    private const string OgpaRehabRateSet = "ogpa_rehab_rate";
+
     private const string DefaultKey = "default";
 
     /// <summary>
@@ -729,6 +813,14 @@ public class Constants
         _ruleTrafficFactor = GetNumber(lookupSets, RuleDistressSet, "traffic_factor");
 
         _surfaceClassGroups = GetSet(lookupSets, SurfaceClassGroupSet);
+
+        // Unit rates. Fetched whole at setup so that a missing SET is a message naming the set before
+        // a single period is modelled, rather than a KeyNotFoundException naming nothing part way
+        // through the first period that happens to trigger a treatment.
+        _unitRates = GetSet(lookupSets, UnitRatesSet);
+        _rehabRatesByTreatment[TreatmentNames.ChipsealRehabilitation] = GetSet(lookupSets, ChipsealRehabRateSet);
+        _rehabRatesByTreatment[TreatmentNames.AsphaltRehabilitation] = GetSet(lookupSets, AsphaltRehabRateSet);
+        _rehabRatesByTreatment[TreatmentNames.OgpaRehabilitation] = GetSet(lookupSets, OgpaRehabRateSet);
 
         // The treatment reset values, and the three group-keyed sets that go with them. Unpacked per
         // group here rather than read on demand, so that a missing row stops the run at setup instead

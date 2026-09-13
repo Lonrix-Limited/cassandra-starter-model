@@ -30,9 +30,10 @@ namespace StarterModel.Objects;
 /// <para>PRE-REPAIRS AND SURFACE RENEWAL ARE NOT ALTERNATIVES HERE, and this class used to treat them
 /// as if they were. They are two independent questions about a treatment, and one treatment answers
 /// yes to both. The three arrangements the specification names all map onto treatments this model
-/// already produces: ThinAC_H is an asphalt overlay WITH repairs in the same year, HMaint_AC is
-/// repairs alone, and PreSeal is repairs followed by a ChipSeal_H a year or two later, which the
-/// surface function '1a' is what forces.</para>
+/// already produces: ac_holding is an asphalt overlay WITH repairs in the same year, ac_hmaint is
+/// repairs alone, and cs_preseal is repairs followed by a cs_2nd_coat_h a year or two later, which the
+/// surface function '1a' is what forces. OGPA repeats the asphalt pair as ogpa_holding and
+/// ogpa_hmaint.</para>
 ///
 /// <para>A REHABILITATION IS THE ONE TREATMENT THE FITTED MODELS CANNOT DESCRIBE, so it is the one
 /// place values are imposed. Every segment in the fitted data is a surfacing over an old pavement -
@@ -51,13 +52,77 @@ public class Resetter
 {
 
     /// <summary>
-    /// The one treatment that is a pre-repair AND a resurfacing in the same year, lower case: an
-    /// asphalt overlay or inlay that includes heavy maintenance repairs. The treatments trigger already
-    /// costs it as both, splitting it between the Resurfacing and Pre-Repairs budget categories.
-    /// <para>Matched in full rather than by prefix, because 'thinac' also matches ThinAC_P, which is
-    /// the same overlay with no or minimal repairs and earns no repair credit.</para>
+    /// What a treatment does to the element, as far as this class is concerned. Three questions
+    /// collapse into one answer per treatment: does it rebuild the pavement, does it earn a repair
+    /// credit, and does it start the surface age again.
     /// </summary>
-    private const string PreRepairWithOverlayTreatment = "thinac_h";
+    private enum ResetKind
+    {
+        /// <summary>A pavement rebuild. Resets both clocks and imposes the permanent offsets.</summary>
+        Rehabilitation,
+
+        /// <summary>A new surface and nothing else. Resets the surface clock, earns no repair credit.</summary>
+        ResurfacingOnly,
+
+        /// <summary>Repairs alone. Touches neither clock; earns the repair credit.</summary>
+        PreRepairOnly,
+
+        /// <summary>A new surface AND repairs in the same year. Resets the surface clock and earns the credit.</summary>
+        PreRepairWithResurfacing,
+    }
+
+    /// <summary>
+    /// WHY THIS IS A SWITCH OVER EVERY TREATMENT AND NOT A PREFIX TEST. It used to match on
+    /// StartsWith("rehab"), StartsWith("hmaint") and StartsWith("preseal"), which worked only while the
+    /// treatment names happened to begin with those words. Under the current names - ac_rehab,
+    /// cs_preseal, ogpa_hmaint - every one of those tests returns false, nothing errors, and every
+    /// treatment falls through to the resurfacing branch: no rehabilitation resets a pavement and no
+    /// pre-repair earns its credit. The forecast is simply wrong and nothing says so.
+    ///
+    /// <para>Naming each treatment explicitly costs one line when a treatment is added and makes that
+    /// failure impossible. A name that is not listed throws, by design.</para>
+    /// </summary>
+    private static ResetKind ClassifyTreatment(TreatmentInstance treatment)
+    {
+        switch (treatment.TreatmentName)
+        {
+            case TreatmentNames.ChipsealRehabilitation:
+            case TreatmentNames.AsphaltRehabilitation:
+            case TreatmentNames.OgpaRehabilitation:
+                return ResetKind.Rehabilitation;
+
+            case TreatmentNames.ChipsealResurfacing:
+            case TreatmentNames.ChipsealSecondCoatAfterPreseal:
+            case TreatmentNames.ChipsealSecondCoatAfterRehab:
+            case TreatmentNames.AsphaltResurfacing:
+            case TreatmentNames.OgpaResurfacing:
+            case TreatmentNames.BlockRepairs:
+            case TreatmentNames.ConcreteRepairs:
+            case TreatmentNames.OtherRepairs:
+                return ResetKind.ResurfacingOnly;
+
+            case TreatmentNames.ChipsealPresealRepairs:
+            case TreatmentNames.AsphaltHeavyMaintenance:
+            case TreatmentNames.OgpaHeavyMaintenance:
+                return ResetKind.PreRepairOnly;
+
+            case TreatmentNames.AsphaltHolding:
+            case TreatmentNames.OgpaHolding:
+                return ResetKind.PreRepairWithResurfacing;
+
+            case TreatmentNames.RoutineMaintenance:
+                throw new Exception($"Treatment '{treatment.TreatmentName}' reached the Resetter, but this model " +
+                                    $"does not produce routine maintenance - GetTriggeredMaintenance " +
+                                    $"returns null. If that changes, decide here what routine " +
+                                    $"maintenance does to the surface age, the surface class and the " +
+                                    $"repair credit, and add an arm for it.");
+
+            default:
+                throw new Exception($"Treatment '{treatment.TreatmentName}' has no arm in Resetter.ClassifyTreatment, " +
+                                    $"so there is no rule for what it does to the element. Add one, and " +
+                                    $"add the matching constant to TreatmentNames.");
+        }
+    }
 
     private ModelBase _frameworkModel;
     private StarterModel _domainModel;
@@ -73,17 +138,20 @@ public class Resetter
 
         if (treatment is null) return segment;
 
-        string treatmentName = treatment.TreatmentName.ToLower();
+        // THESE ARE TWO INDEPENDENT QUESTIONS AND THE HOLDING TREATMENTS ANSWER YES TO BOTH - an
+        // asphalt or OGPA overlay that includes heavy maintenance repairs, which is why the treatments
+        // trigger already splits its cost between the Resurfacing and Pre-Repairs budget categories.
+        // Treating pre-repair and resurfacing as alternative branches, as this method used to, left
+        // that arrangement nowhere to go: it reset the clock and earned no repair credit.
+        //
+        // Compared exactly, with no case folding: the names come from TreatmentNames on the way out and
+        // come back unchanged, so anything that does not match is a treatment this class has no rule
+        // for, and ClassifyTreatment says so rather than guessing.
+        ResetKind resetKind = ClassifyTreatment(treatment);
 
-        // THESE ARE TWO INDEPENDENT QUESTIONS AND ThinAC_H ANSWERS YES TO BOTH - an asphalt overlay
-        // that includes heavy maintenance repairs, which is why the treatments trigger already splits
-        // its cost between the Resurfacing and Pre-Repairs budget categories. Treating pre-repair and
-        // resurfacing as alternative branches, as this method used to, left that arrangement nowhere
-        // to go: it reset the clock and earned no repair credit.
-        bool isRehab = treatmentName.StartsWith("rehab");
-        bool isPreRepair = treatmentName.StartsWith("hmaint") || treatmentName.StartsWith("preseal")
-                           || treatmentName == PreRepairWithOverlayTreatment;
-        bool renewsSurface = !treatmentName.StartsWith("hmaint") && !treatmentName.StartsWith("preseal");
+        bool isRehab = resetKind == ResetKind.Rehabilitation;
+        bool isPreRepair = resetKind == ResetKind.PreRepairOnly || resetKind == ResetKind.PreRepairWithResurfacing;
+        bool renewsSurface = resetKind != ResetKind.PreRepairOnly;
 
         // Every draw below comes from here. See SegmentRandom for why it is not model.Random.
         Random random = SegmentRandom.ForSegment(_frameworkModel.RandomSeed, segment.ElementIndex, period);
@@ -137,9 +205,9 @@ public class Resetter
         // that renews no surface adds nothing at all.
         //
         // THAT LAST CASE WAS WRONG UNTIL THE PRE-REPAIR RESET LANDED, and it was inherited rather than
-        // decided. PreSeal used to add 10 mm of chip and a layer for a treatment that lays no chip -
-        // and then the ChipSeal_H that follows it a year or two later added another 15 mm and another
-        // layer for the seal that actually went down. HMaint_AC escaped only because asphalt's
+        // decided. cs_preseal used to add 10 mm of chip and a layer for a treatment that lays no chip -
+        // and then the cs_2nd_coat_h that follows it a year or two later added another 15 mm and another
+        // layer for the seal that actually went down. ac_hmaint escaped only because asphalt's
         // 'thickness to add' happens to be zero. Neither quantity drives any model; both are reported
         // as par_surf_thick and par_surf_layers, so this was a reporting defect and not a forecast one.
         if (isRehab)
@@ -312,7 +380,7 @@ public class Resetter
     /// The surface function the segment carries after the treatment.
     /// <para>'1a' means preseal repairs are down and the seal over them has not been laid yet. It is
     /// load-bearing rather than descriptive: the candidate selector reads it to force the follow-up
-    /// ChipSeal_H, the trigger reads it to avoid stacking a second lot of repairs on top, and the
+    /// cs_2nd_coat_h, the trigger reads it to avoid stacking a second lot of repairs on top, and the
     /// expected-life lookup falls back to the reseal life because repairs have no life of their own.
     /// A pre-repair that comes WITH an overlay is a real resurfacing and must not take it.</para>
     /// </summary>
@@ -320,9 +388,13 @@ public class Resetter
     {
         if (!renewsSurface) return "1a";
 
-        if (treatmentName.ToLower().StartsWith("rehab_ac")) return "2";
+        // An asphalt or OGPA rebuild leaves a surface that behaves like a second coat; a chipseal
+        // rebuild leaves a first coat, which is what makes the second coat that follows it valid.
+        if (treatmentName == TreatmentNames.AsphaltRehabilitation) return "2";
 
-        if (treatmentName.ToLower().StartsWith("rehab_cs")) return "1";
+        if (treatmentName == TreatmentNames.OgpaRehabilitation) return "2";
+
+        if (treatmentName == TreatmentNames.ChipsealRehabilitation) return "1";
 
         if (currentSurfaceFunction == "1a") return "H";
 

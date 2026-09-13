@@ -11,9 +11,21 @@ namespace StarterModel.Objects;
 /// </summary>
 public class TreatmentsTrigger
 {
+    /// <summary>
+    /// The surface class that takes the OGPA family of treatment names. See the region "Which family
+    /// of treatment names this segment takes" for why it is the CURRENT class that decides.
+    /// </summary>
+    private const string OgpaSurfaceClass = "ogpa";
+
+    /// <summary>
+    /// The unit rate passed for a holding treatment, whose cost is carried in the quantity rather
+    /// than in the rate. Its row in 'unit_rates_general' reads 'N/A' on purpose and must never be
+    /// read as a number.
+    /// </summary>
+    private const double HoldingTreatmentUnitRate = 1.0;
+
     private ModelBase _frameworkModel;
     private StarterModel _domainModel;
-    Dictionary<string, object> _unitRateSet = null!;
 
     public TreatmentsTrigger(ModelBase frameworkModel, StarterModel domainModel)
     {
@@ -22,9 +34,7 @@ public class TreatmentsTrigger
     }
 
     public List<TreatmentInstance> GetTriggeredTreatments(RoadSegment segment, int period, Dictionary<string, object> infoFromModel)
-    {     
-        _unitRateSet = _frameworkModel.Lookups["unit_rate_set"] as Dictionary<string, object>;
-
+    {
         List<TreatmentInstance> triggeredTreatments = new List<TreatmentInstance>();
 
         // Check if the segment passes the Candidate Selection checks. If not, return an empty list.
@@ -58,9 +68,9 @@ public class TreatmentsTrigger
         this.AddPreservationChipsealIfValid(segment, period, triggeredTreatments);        
         this.AddPresealOnChipsealIfValid(segment, period, triggeredTreatments);
 
-        this.AddPreservationThinACIfValid(segment, period, triggeredTreatments);
-        this.AddHoldingThinACIfValid(segment, period, triggeredTreatments);
-        this.AddAcHeavyMaintenanceIfValid(segment, period, triggeredTreatments, infoFromModel);
+        this.AddPreservationAcOrOgpaIfValid(segment, period, triggeredTreatments);
+        this.AddHoldingAcOrOgpaIfValid(segment, period, triggeredTreatments);
+        this.AddHeavyMaintenanceAcOrOgpaIfValid(segment, period, triggeredTreatments, infoFromModel);
 
         this.AddRehabilitationIfValid(segment, period, triggeredTreatments);
 
@@ -111,7 +121,66 @@ public class TreatmentsTrigger
 
     }
 
-            
+
+    #endregion
+
+    #region Which family of treatment names this segment takes
+
+    // THE ROUTE THROUGH THIS CLASS IS CHOSEN BY THE NEXT SURFACE; THE NAME IS CHOSEN BY THE CURRENT
+    // SURFACE CLASS. The two are different questions and only one of them can answer for OGPA.
+    //
+    // 'inp_next_surf' carries only cs, ac, blocks, concrete and other - the default arm of
+    // AddBirthdayTreatmentBlocksOrConcreteIfValid is the proof, since it treats everything that is not
+    // blocks, concrete or other as chipseal or asphalt. So an OGPA road's next surface reads 'ac', and
+    // the segment's current surface class is the only place in the model where OGPA exists at all.
+    //
+    // One consequence, and it is deliberate rather than overlooked: an OGPA segment stays OGPA for the
+    // whole run, because the Resetter writes the class straight back from 'treat_surf_class'. There is
+    // no way to say "this OGPA road is rehabilitated as plain asphalt". That needs an input column of
+    // its own and is a separate change.
+
+    /// <summary>
+    /// The resurfacing treatment for a segment on the asphalt route - the route taken when the next
+    /// surface is not chipseal. 'slurry' takes the asphalt names, as it does everywhere else in the
+    /// setup.
+    /// </summary>
+    private static string ResurfacingNameForAsphaltRoute(RoadSegment segment)
+    {
+        return segment.SurfaceClass == OgpaSurfaceClass
+            ? TreatmentNames.OgpaResurfacing
+            : TreatmentNames.AsphaltResurfacing;
+    }
+
+    /// <summary>The overlay-with-repairs treatment for a segment on the asphalt route.</summary>
+    private static string HoldingNameForAsphaltRoute(RoadSegment segment)
+    {
+        return segment.SurfaceClass == OgpaSurfaceClass
+            ? TreatmentNames.OgpaHolding
+            : TreatmentNames.AsphaltHolding;
+    }
+
+    /// <summary>The repairs-alone treatment for a segment on the asphalt route.</summary>
+    private static string HeavyMaintenanceNameForAsphaltRoute(RoadSegment segment)
+    {
+        return segment.SurfaceClass == OgpaSurfaceClass
+            ? TreatmentNames.OgpaHeavyMaintenance
+            : TreatmentNames.AsphaltHeavyMaintenance;
+    }
+
+    /// <summary>
+    /// The rehabilitation treatment for this segment. Chipseal is decided by the next surface because
+    /// a rehabilitation may change the surfacing type; asphalt and OGPA are separated by the current
+    /// class, for the reason at the top of this region.
+    /// </summary>
+    private static string RehabilitationName(RoadSegment segment)
+    {
+        if (segment.NextSurfaceIsChipSeal) return TreatmentNames.ChipsealRehabilitation;
+
+        return segment.SurfaceClass == OgpaSurfaceClass
+            ? TreatmentNames.OgpaRehabilitation
+            : TreatmentNames.AsphaltRehabilitation;
+    }
+
     #endregion
 
     private void AddBirthdayTreatmentBlocksOrConcreteIfValid(RoadSegment segment, int iPeriod, List<TreatmentInstance> treatments)
@@ -124,13 +193,13 @@ public class TreatmentsTrigger
         switch (segment.NextSurface)
         {
             case "blocks":
-                treatmentName = "BlockRep";
+                treatmentName = TreatmentNames.BlockRepairs;
                 break;
             case "concrete":
-                treatmentName = "ConcRep";
+                treatmentName = TreatmentNames.ConcreteRepairs;
                 break;
             case "other":
-                treatmentName = "Xtreat";
+                treatmentName = TreatmentNames.OtherRepairs;
                 break;
             default:
                 //If we get here, it is ChipSeal or Asphalt, which are not valid for this treatment
@@ -144,9 +213,7 @@ public class TreatmentsTrigger
         double quantity = segment.AreaSquareMetre;
         bool forceTreatment = true;
 
-        
-        if (!_unitRateSet.ContainsKey(treatmentName)) throw new Exception($"Unit rate for treatment {treatmentName} not found in lookup sets.");
-        double unitRate = Convert.ToDouble(_unitRateSet[treatmentName]);
+        double unitRate = _domainModel.Constants.GetUnitRate(treatmentName);
 
         TreatmentInstance treatment = new TreatmentInstance(segment.ElementIndex, treatmentName, iPeriod, quantity, unitRate, forceTreatment,  "Birthday treatment", "");
         treatment.TreatmentSuitabilityScore = 102; // Set a high suitability score for second coat treatments
@@ -165,13 +232,11 @@ public class TreatmentsTrigger
         string reason = "";
         string comment = "";
 
-        treatmentName = "ChipSeal_H";
+        treatmentName = TreatmentNames.ChipsealSecondCoatAfterPreseal;
         reason = "Pre-seal follow-up";
         double quantity = segment.AreaSquareMetre;
 
-        
-        if (!_unitRateSet.ContainsKey(treatmentName)) throw new Exception($"Unit rate for treatment {treatmentName} not found in lookup sets.");
-        double unitRate = Convert.ToDouble(_unitRateSet[treatmentName]);
+        double unitRate = _domainModel.Constants.GetUnitRate(treatmentName);
 
         TreatmentInstance treatment = new TreatmentInstance(segment.ElementIndex, treatmentName, iPeriod, quantity, unitRate, true, reason, comment);
         treatment.TreatmentSuitabilityScore = 102;  //fixed high score to force this treatment to be selected if it is valid
@@ -185,10 +250,9 @@ public class TreatmentsTrigger
         {
             double quantity = segment.AreaSquareMetre;
 
-            string treatmentName = "ChipSeal_S";
+            string treatmentName = TreatmentNames.ChipsealSecondCoatAfterRehab;
 
-            if (!_unitRateSet.ContainsKey(treatmentName)) throw new Exception($"Unit rate for treatment {treatmentName} not found in lookup sets.");
-            double unitRate = Convert.ToDouble(_unitRateSet[treatmentName]);
+            double unitRate = _domainModel.Constants.GetUnitRate(treatmentName);
 
             TreatmentInstance treatment = new TreatmentInstance(segment.ElementIndex, treatmentName, iPeriod, quantity: quantity, unitRate: unitRate, 
                                                                 true, "Second coat", "Second coat");
@@ -199,7 +263,7 @@ public class TreatmentsTrigger
 
     private void AddPreservationChipsealIfValid(RoadSegment segment, int iPeriod, List<TreatmentInstance> treatments)
     {
-        string treatmentName = "ChipSeal_P";
+        string treatmentName = TreatmentNames.ChipsealResurfacing;
         if (segment.NextSurfaceIsChipSeal == false) return;
         
         // If the rut depth is above the maximum threshold, do not add a treatment
@@ -218,19 +282,22 @@ public class TreatmentsTrigger
         string reason = $"SLA={Math.Round(segment.SurfaceAchievedLifePercent, 1)}";
         string comment = $"SDI={Math.Round(sdi, 1)}, TSS={Math.Round(tssScore, 2)}";
 
-        if (!_unitRateSet.ContainsKey(treatmentName)) throw new Exception($"Unit rate for treatment {treatmentName} not found in lookup sets.");
-        double unitRate = Convert.ToDouble(_unitRateSet[treatmentName]);
+        double unitRate = _domainModel.Constants.GetUnitRate(treatmentName);
 
         double quantity = segment.AreaSquareMetre;
-        TreatmentInstance treatment = new TreatmentInstance(segment.ElementIndex, treatmentName, iPeriod, quantity: quantity, unitRate: unitRate, 
+        TreatmentInstance treatment = new TreatmentInstance(segment.ElementIndex, treatmentName, iPeriod, quantity: quantity, unitRate: unitRate,
                                                             false, reason, comment);
         treatment.TreatmentSuitabilityScore = tssScore;
         treatments.Add(treatment);
     }
 
-    private void AddPreservationThinACIfValid(RoadSegment segment, int iPeriod, List<TreatmentInstance> treatments)
+    /// <summary>
+    /// Thin asphalt or OGPA resurfacing with no or minimal repairs. Which of the two it is named as
+    /// follows the segment's CURRENT surface class - see the naming region above.
+    /// </summary>
+    private void AddPreservationAcOrOgpaIfValid(RoadSegment segment, int iPeriod, List<TreatmentInstance> treatments)
     {
-        string treatmentName = "ThinAC_P";
+        string treatmentName = ResurfacingNameForAsphaltRoute(segment);
         if (segment.NextSurfaceIsChipSeal == true) return;
 
         // If the rut depth is above the maximum threshold, do not add a treatment
@@ -256,8 +323,7 @@ public class TreatmentsTrigger
         
         double overlayQuantity = segment.AreaSquareMetre;
 
-        if (!_unitRateSet.ContainsKey(treatmentName)) throw new Exception($"Unit rate for treatment {treatmentName} not found in lookup sets.");
-        double unitRate = Convert.ToDouble(_unitRateSet[treatmentName]);
+        double unitRate = _domainModel.Constants.GetUnitRate(treatmentName);
 
         TreatmentInstance treatment = new TreatmentInstance(segment.ElementIndex, treatmentName, iPeriod, quantity: overlayQuantity, unitRate:unitRate,
                                                             false, reason, comment);
@@ -266,9 +332,14 @@ public class TreatmentsTrigger
         treatments.Add(treatment);
     }
 
-    private void AddHoldingThinACIfValid(RoadSegment segment, int iPeriod, List<TreatmentInstance> treatments)
-    {        
-        string treatmentName = "ThinAC_H";
+    /// <summary>
+    /// An asphalt or OGPA inlay/overlay that INCLUDES heavy maintenance repairs, in the same year.
+    /// Costed as the two pieces added together and carried in the quantity, then split back across the
+    /// Resurfacing and Pre-Repairs budgets in the fractions that produced it.
+    /// </summary>
+    private void AddHoldingAcOrOgpaIfValid(RoadSegment segment, int iPeriod, List<TreatmentInstance> treatments)
+    {
+        string treatmentName = HoldingNameForAsphaltRoute(segment);
         if (segment.NextSurfaceIsChipSeal == true) return;
 
         // If the rut depth is above the maximum threshold, do not add a treatment
@@ -296,22 +367,38 @@ public class TreatmentsTrigger
         double overlayQuantity = quantity;
         double repairQuantity = quantity * Math.Min(100, segment.PavementDistressIndex) / 100;
         
-        if (!_unitRateSet.ContainsKey("ThinAC_P")) throw new Exception($"Unit rate for treatment {"ThinAC_P"} not found in lookup sets.");
-        double acOverlayUnitRate = Convert.ToDouble(_unitRateSet["ThinAC_P"]);
-        
-        if (!_unitRateSet.ContainsKey("HMaint_AC")) throw new Exception($"Unit rate for treatment {"HMaint_AC"} not found in lookup sets.");
-        double acRepairUnitRate = Convert.ToDouble(_unitRateSet["HMaint_AC"]);
+        // The two halves are priced from the treatments they are made of - the plain resurfacing and
+        // the repairs-alone heavy maintenance - and both follow the same asphalt-or-OGPA family as the
+        // holding treatment itself.
+        double overlayUnitRate = _domainModel.Constants.GetUnitRate(ResurfacingNameForAsphaltRoute(segment));
+        double repairUnitRate = _domainModel.Constants.GetUnitRate(HeavyMaintenanceNameForAsphaltRoute(segment));
 
-        double overlayCost = overlayQuantity * acOverlayUnitRate;
-        double repairCost = repairQuantity * acRepairUnitRate;
+        double overlayCost = overlayQuantity * overlayUnitRate;
+        double repairCost = repairQuantity * repairUnitRate;
 
         double totalCost = overlayCost + repairCost;
 
+        // A HOLDING TREATMENT WITH NO COST CANNOT BE COSTED OR SPLIT. The budget fractions below divide
+        // by this total, so a zero would reach AssignBudgetCategoryFractions as NaN and surface as an
+        // OverflowException naming nothing. It can only happen if BOTH rates this treatment is built
+        // from are still sitting at zero in lookups.xlsx, which is a treatment that has not been priced
+        // rather than one that is free - and a free treatment would win every optimisation it entered.
+        if (totalCost <= 0)
+        {
+            throw new Exception($"Treatment '{treatmentName}' has no cost: the unit rates for " +
+                                $"'{ResurfacingNameForAsphaltRoute(segment)}' and " +
+                                $"'{HeavyMaintenanceNameForAsphaltRoute(segment)}' in the " +
+                                $"'unit_rates_general' set of lookups.xlsx are both zero. Price them on " +
+                                $"the Treatment Rates tab of the Tuning page before running this model.");
+        }
+
         double dummyArea = totalCost; // Dummy area which is effectively the cost
-                        
-        if (!_unitRateSet.ContainsKey(treatmentName)) throw new Exception($"Unit rate for treatment {treatmentName} not found in lookup sets.");
-        double unitRate = Convert.ToDouble(_unitRateSet[treatmentName]);
-        if (unitRate != 1.0) throw new Exception($"Unit rate for treatment {treatmentName} should be 1.0, but found {unitRate}. This is because the cost is calculated based on the relative fractions of the overlay and repair costs.");
+
+        // THE HOLDING TREATMENT'S OWN RATE IS NEVER READ, and its row in 'unit_rates_general' says so:
+        // it reads 'N/A', not a number. The cost is already in the quantity above, so the rate has to
+        // be exactly 1.0 - it is passed as a constant here rather than fetched and then asserted, which
+        // is what this used to do and what turned the deliberate 'N/A' into a FormatException.
+        double unitRate = HoldingTreatmentUnitRate;
 
         TreatmentInstance treatment = new TreatmentInstance(segment.ElementIndex, treatmentName, iPeriod, quantity: dummyArea, unitRate: unitRate,
                                                             false, reason, comment);
@@ -331,7 +418,11 @@ public class TreatmentsTrigger
         treatments.Add(treatment);
     }
 
-    private void AddAcHeavyMaintenanceIfValid(RoadSegment segment, int iPeriod, List<TreatmentInstance> treatments, Dictionary<string, object> infoFromModel)
+    /// <summary>
+    /// Heavy maintenance repairs on asphalt or OGPA, with no surfacing over them. A pre-repair: it
+    /// renews no surface and does not move the surface age.
+    /// </summary>
+    private void AddHeavyMaintenanceAcOrOgpaIfValid(RoadSegment segment, int iPeriod, List<TreatmentInstance> treatments, Dictionary<string, object> infoFromModel)
     {
         double presealAreaFraction = 0.0; // Default value
 
@@ -358,7 +449,7 @@ public class TreatmentsTrigger
         presealAreaFraction = Convert.ToDouble(presealAreaFractionLookup.Evaluate(paramVals));
         if (presealAreaFraction <= 0.0) return; // If preseal area fraction is zero or negative, do not add a treatment
 
-        TreatmentInstance? treatment = this.GetPresealTreatment(segment, iPeriod, "HMaint_AC", presealAreaFraction);
+        TreatmentInstance? treatment = this.GetPresealTreatment(segment, iPeriod, HeavyMaintenanceNameForAsphaltRoute(segment), presealAreaFraction);
         if (treatment is not null)
         {
             treatments.Add(treatment);
@@ -381,7 +472,7 @@ public class TreatmentsTrigger
         presealAreaFraction = Convert.ToDouble(presealAreaFractionLookup.Evaluate(paramVals));
         if (presealAreaFraction <= 0.0) return; // If preseal area fraction is zero or negative, do not add a treatment
         
-        TreatmentInstance? treatment = this.GetPresealTreatment(segment, iPeriod, "PreSeal", presealAreaFraction);
+        TreatmentInstance? treatment = this.GetPresealTreatment(segment, iPeriod, TreatmentNames.ChipsealPresealRepairs, presealAreaFraction);
         if (treatment is not null) treatments.Add(treatment);
 
     }
@@ -398,7 +489,11 @@ public class TreatmentsTrigger
             
         }
 
-        string treatmentName = "Rehab_" + segment.SurfaceRoadType.ToUpper(); ;
+        // ONE NAME PER SURFACING FAMILY, WHERE THERE USED TO BE TWELVE. The old name carried the
+        // surface class and the urban/rural road type because the rate was flat and had to be looked up
+        // by the whole combination. Rehabilitation rates are now keyed by ONRC category in their own
+        // lookup sets, so the road type has no business in the name.
+        string treatmentName = RehabilitationName(segment);
 
         double pdi = segment.PavementDistressIndex;
         
@@ -408,8 +503,7 @@ public class TreatmentsTrigger
         string reason = $"SLA={Math.Round(segment.SurfaceAchievedLifePercent, 1)}";
         string comment = $"PDI={Math.Round(pdi, 1)}, TSS={Math.Round(tssScore, 2)}";
 
-        if (!_unitRateSet.ContainsKey(treatmentName)) throw new Exception($"Unit rate for treatment {treatmentName} not found in lookup sets.");
-        double unitRate = Convert.ToDouble(_unitRateSet[treatmentName]);
+        double unitRate = _domainModel.Constants.GetRehabUnitRate(treatmentName, segment.ONRC);
 
         double quantity = segment.AreaSquareMetre;
         TreatmentInstance treatment = new TreatmentInstance(segment.ElementIndex, treatmentName, iPeriod, quantity: quantity, unitRate: unitRate,
@@ -442,8 +536,7 @@ public class TreatmentsTrigger
         string reason = $"SLA={Math.Round(segment.SurfaceAchievedLifePercent, 1)}";
         string comment = $"PDI={Math.Round(pdi, 1)}, TSS={Math.Round(tssScore, 2)}";
         
-        if (!_unitRateSet.ContainsKey(treatmentName)) throw new Exception($"Unit rate for treatment {treatmentName} not found in lookup sets.");
-        double unitRate = Convert.ToDouble(_unitRateSet[treatmentName]);
+        double unitRate = _domainModel.Constants.GetUnitRate(treatmentName);
 
         double quantity = segment.AreaSquareMetre * treatmentAreaFraction;
         TreatmentInstance treatment = new TreatmentInstance(segment.ElementIndex, treatmentName, iPeriod, quantity: quantity, unitRate: unitRate,
@@ -464,7 +557,7 @@ public class TreatmentsTrigger
         int minTreatmentPeriod = int.MaxValue;
         foreach (TreatmentInstance treatment in previousTreatments)
         {
-            if (treatment.TreatmentName != "RMaint")
+            if (treatment.TreatmentName != TreatmentNames.RoutineMaintenance)
             {
                 int periodsToTreatment = iPeriod - treatment.TreatmentPeriod;
                 if (periodsToTreatment < minTreatmentPeriod)
