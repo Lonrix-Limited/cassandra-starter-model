@@ -392,6 +392,11 @@ public class DeteriorationModels
     /// Recomputes flushing and ravelling from the rule-based model at the given surface age. Both are
     /// zero on a new surface and stay zero until a fraction of its expected life has passed, so a
     /// resurfacing and a rehabilitation reset them with no arithmetic at all.
+    /// <para>Potholes take the same rule in the specification and are deliberately NOT modelled here:
+    /// this model carries no pothole parameter, and pothole extent never exceeds 0.12% anywhere on the
+    /// network, which is noise rather than signal. Worth knowing before the pothole reads still left in
+    /// CalculationUtilities are dealt with, because the answer there is to delete them rather than to
+    /// add a model behind them.</para>
     /// </summary>
     public void UpdateRuleBasedDistresses(RoadSegment segment, double surfaceAgeYears)
     {

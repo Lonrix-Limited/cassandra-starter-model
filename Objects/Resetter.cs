@@ -27,10 +27,11 @@ namespace StarterModel.Objects;
 /// as-new condition and recomputing next period would snap it straight back, which is what the
 /// permanent offsets carried by RoadSegment.HasBeenRehabilitated exist to stop.</para>
 ///
-/// <para>THIS CLASS RUNS IN PARALLEL. The framework steps elements under Parallel.For when the run has
-/// DoParallel on, so every random draw here comes from a generator derived from the run seed and the
-/// element index - never from the shared model generator, which is not thread safe and whose sequence
-/// would depend on thread scheduling.</para>
+/// <para>EVERY DRAW HERE COMES FROM THE SEGMENT'S OWN STREAM, not from the shared model generator.
+/// The reason is not thread safety - the framework does not process one model's elements in parallel -
+/// but that a shared generator makes each segment's draws depend on how many draws every segment
+/// treated before it happened to take, and a rehabilitation takes more of them than a reseal. See
+/// SegmentRandom. The Initialiser draws the same way, at period 0.</para>
 /// </summary>
 public class Resetter
 {
@@ -53,8 +54,8 @@ public class Resetter
         bool isRehab = treatmentName.StartsWith("rehab");
         bool isPreseal = treatmentName.StartsWith("hmaint") || treatmentName.StartsWith("preseal");
 
-        // Every draw below comes from here. See GetSegmentRandom for why it is not model.Random.
-        Random random = GetSegmentRandom(_frameworkModel.RandomSeed, segment.ElementIndex, period);
+        // Every draw below comes from here. See SegmentRandom for why it is not model.Random.
+        Random random = SegmentRandom.ForSegment(_frameworkModel.RandomSeed, segment.ElementIndex, period);
 
         // Reset (or increment where not applicable) all properties related to model parameters
         // Keep the code same order as the model parameter list
@@ -240,36 +241,6 @@ public class Resetter
     }
 
     #endregion
-
-    /// <summary>
-    /// A random generator for one element in one period, derived from the run seed rather than shared.
-    ///
-    /// <para>WHY NOT model.Random. The framework steps elements under Parallel.For when DoParallel is
-    /// on, and System.Random is not thread safe: concurrent draws corrupt its internal state, and the
-    /// run stops being reproducible from its seed with nothing reporting it. Locking a shared generator
-    /// would fix the corruption and leave a worse problem, because the sequence each element received
-    /// would then depend on the order the threads happened to reach it.</para>
-    ///
-    /// <para>Deriving the seed from the run seed, the element and the period gives each element its own
-    /// independent stream, and the same stream whatever order the elements are processed in. The mixing
-    /// below is a standard 64-bit avalanche: seeding System.Random with a raw sum would leave nearby
-    /// elements with visibly similar first draws.</para>
-    /// </summary>
-    private static Random GetSegmentRandom(int runSeed, int elementIndex, int period)
-    {
-        unchecked
-        {
-            ulong z = (ulong)(uint)runSeed * 0x9E3779B97F4A7C15UL
-                    + (ulong)(uint)elementIndex * 0xBF58476D1CE4E5B9UL
-                    + (ulong)(uint)period * 0x94D049BB133111EBUL;
-
-            z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9UL;
-            z = (z ^ (z >> 27)) * 0x94D049BB133111EBUL;
-            z ^= z >> 31;
-
-            return new Random((int)(z & 0x7FFFFFFFUL));
-        }
-    }
 
     private string GetSurfaceFunction(string treatmentName, bool isPreseal, string currentSurfaceFunction)
     {

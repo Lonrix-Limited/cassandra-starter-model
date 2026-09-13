@@ -52,12 +52,18 @@ public class Initialiser
             this.ApplyRehabilitationSinceSurvey(segment);
         }
 
+        // Every draw below comes from here, and period 0 is initialisation. See SegmentRandom for why
+        // it is not model.Random: the three methods below take a different NUMBER of draws depending on
+        // what the segment's survey turned out to say, so on a shared generator each segment's character
+        // would depend on what the segments before it happened to need.
+        Random random = SegmentRandom.ForSegment(_frameworkModel.RandomSeed, segment.ElementIndex, 0);
+
         // Turn the surveyed condition into the segment's persistent random draws. Same order as the
         // Incrementer - cracking, then rutting, then roughness - because the rutting and roughness
         // inversions have to undo the cracking feedback term, which means cracking must already be set.
-        InitialiseCracking(segment, surveyStatus);
-        InitialiseRutting(segment, surveyStatus);
-        InitialiseRoughness(segment, surveyStatus);
+        InitialiseCracking(segment, surveyStatus, random);
+        InitialiseRutting(segment, surveyStatus, random);
+        InitialiseRoughness(segment, surveyStatus, random);
 
         // The two increment parameters are diagnostics reporting what the level models did over a
         // period. There is no previous period at year zero, so there is nothing to report yet.
@@ -160,14 +166,18 @@ public class Initialiser
     /// Sets the segment's two persistent cracking draws and its held sub-threshold value, then its
     /// year-zero cracking, from the surveyed reading.
     ///
-    /// <para>Three cases, and the difference between them is what the reading entitles the segment to.
-    /// A reading at or above the onset threshold says the segment HAS cracked, so its onset position
+    /// <para>FOUR cases, and the difference between them is what the reading entitles the segment to.
+    /// The first is decided before the reading is even looked at: a segment resurfaced or rebuilt since
+    /// the survey has a reading that describes a surface it no longer has, so it is discarded and the
+    /// segment starts uncracked. The remaining three all read the survey.</para>
+    ///
+    /// <para>A reading at or above the onset threshold says the segment HAS cracked, so its onset position
     /// must be one that produces onset at this age, and its severity quantile is an exact inversion. A
     /// reading below the threshold says it has NOT cracked, which is real information and more of it
     /// the older the segment: an old surface still uncracked must sit high in the onset order and will
     /// crack late or never.</para>
     ///
-    /// <para>The third case is a segment with no visual survey at all, which the input marks with -1 -
+    /// <para>The last case is a segment with no visual survey at all, which the input marks with -1 -
     /// nearly 30% of this network. It is entitled to NOTHING, and that is the point: it gets a blind
     /// onset draw, exactly as a segment of its age and traffic would have. Giving it the
     /// below-threshold treatment instead would turn "nobody looked" into "we know it has not cracked",
@@ -175,10 +185,9 @@ public class Initialiser
     /// sub-threshold value is set to zero, which is the engineer's call; the alternative differs by at
     /// most one percentage point, because Part C is bounded by the onset threshold.</para>
     /// </summary>
-    private void InitialiseCracking(RoadSegment segment, SurveyStatus surveyStatus)
+    private void InitialiseCracking(RoadSegment segment, SurveyStatus surveyStatus, Random random)
     {
         DeteriorationModels models = _domainModel.DeteriorationModels;
-        Random random = _frameworkModel.Random;
 
         // As read from inp_pct_cracks by the factory, so it may still carry the not-surveyed sentinel.
         double observedCracking = segment.PctCracking;
@@ -252,13 +261,13 @@ public class Initialiser
     /// whole run. Chipseal is the opposite and its factor is 1.0: a seal follows the shape of what it is
     /// laid on, so the surveyed rut still describes the segment after a reseal.</para>
     /// </summary>
-    private void InitialiseRutting(RoadSegment segment, SurveyStatus surveyStatus)
+    private void InitialiseRutting(RoadSegment segment, SurveyStatus surveyStatus, Random random)
     {
         DeteriorationModels models = _domainModel.DeteriorationModels;
 
         if (surveyStatus == SurveyStatus.OvertakenByRehabilitation)
         {
-            segment.RutDeviate = models.DrawLevelDeviate(_frameworkModel.Random);
+            segment.RutDeviate = models.DrawLevelDeviate(random);
             segment.RutInitSource = RoadSegment.InitSourceInferred;
         }
         else
@@ -283,13 +292,13 @@ public class Initialiser
     /// network was not measured: those segments carry an imputed reading rather than a detectable
     /// sentinel, so the model cannot tell them apart and does not try to.</para>
     /// </summary>
-    private void InitialiseRoughness(RoadSegment segment, SurveyStatus surveyStatus)
+    private void InitialiseRoughness(RoadSegment segment, SurveyStatus surveyStatus, Random random)
     {
         DeteriorationModels models = _domainModel.DeteriorationModels;
 
         if (surveyStatus == SurveyStatus.OvertakenByRehabilitation)
         {
-            segment.IriDeviate = models.DrawLevelDeviate(_frameworkModel.Random);
+            segment.IriDeviate = models.DrawLevelDeviate(random);
             segment.IriInitSource = RoadSegment.InitSourceInferred;
         }
         else
