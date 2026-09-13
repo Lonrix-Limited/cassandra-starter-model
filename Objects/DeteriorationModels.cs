@@ -684,13 +684,35 @@ public class DeteriorationModels
     // period would step to a third with no treatment behind it. Shrinking the credit keeps the state
     // and the reported value in agreement for the rest of the segment's life.
     //
-    // ONLY THE REPAIR YEAR NEEDS CHECKING, which is why these are called from the guarded update and
-    // nowhere else: from the next period onwards the credit only decays and the clock only advances,
-    // so every later value is higher than this one.
+    // THE REPAIR YEAR IS THE ONLY YEAR THESE ARE CALLED FROM, and that covers the compounding they
+    // were written for: while the segment is left alone the credit only decays and the clock only
+    // advances, so every later value is higher than the one checked here.
+    //
+    // IT DOES NOT COVER A LATER RESURFACING. A reseal or a plain overlay sends the clock back to zero
+    // while the credit survives - deliberately, because a seal does not undo a digout - and a plain
+    // overlay is not a pre-repair, so nothing re-checks the floor. With the roughness switch turned on
+    // at an extent of 1.0 IRI, an asphalt segment repaired at surface age 15 and overlaid three years
+    // later comes out at IRI 2.51, under the 3.13 floor and under the 2.50 a rehabilitation imposes.
+    // Nothing reaches that as delivered, because the roughness extent is zero and asphalt rut is
+    // already below its floor before any repair is considered. Whether an overlay plus a retained
+    // repair credit SHOULD be floored at the rebuild value is an engineering question rather than an
+    // oversight, and it is Fritz's to answer.
 
     private void GuardCrackingCredit(RoadSegment segment, double surfaceAgeYears)
     {
         if (segment.PreRepairCreditCracking <= 0.0) return;
+
+        // BELOW THE ONSET THRESHOLD THERE IS NOTHING TO GUARD, and guarding anyway is worse than not
+        // guarding. An uncracked segment reports its held sub-threshold value, which the credit played
+        // no part in producing, so the floor test below is comparing the wrong number and the
+        // arithmetic under it - which inverts the severity formula - is not inverting the value it has
+        // been handed. It can come back LARGER than the credit it was asked to cap: an asphalt segment
+        // 45% cracked at surface age 15 and overlaid with ThinAC_H, whose surface age therefore returns
+        // to zero and whose onset position no longer produces onset, has its credit raised from 0.52 to
+        // 0.83 deviate units against a 2.5% floor - a permanent discount it carries into every later
+        // period in which it does cross the threshold. Skipping the check here is the same rule that
+        // gives an uncracked segment no cracking credit in the first place.
+        if (segment.CrackOnsetPosition >= this.CrackOnsetProbability(segment, surfaceAgeYears)) return;
 
         double floor = _constants.PreRepairGuardFactor * _constants.RehabResetCrackingPercent;
         if (floor <= 0.0 || segment.PctCracking >= floor) return;
