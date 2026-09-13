@@ -65,6 +65,12 @@ public class Constants
     private double _rehabResetRutMillimetres;
     private double _rehabResetIri;
 
+    private double _preRepairMaxExtentCrackPercent;
+    private double _preRepairMaxExtentRutMillimetres;
+    private double _preRepairMaxExtentIri;
+    private double _preRepairRetainedFraction;
+    private double _preRepairGuardFactor;
+
     private Dictionary<string, object> _surfaceClassGroups = new Dictionary<string, object>();
 
     // Group-keyed deterioration numbers, unpacked once at setup so that a missing key stops the run
@@ -75,6 +81,7 @@ public class Constants
     private Dictionary<string, double> _rehabOffsetCrackOnset = new Dictionary<string, double>();
     private Dictionary<string, double> _staleSurveyResurfacingRut = new Dictionary<string, double>();
     private Dictionary<string, double> _staleSurveyResurfacingIri = new Dictionary<string, double>();
+    private Dictionary<string, double> _preRepairDecayTauYears = new Dictionary<string, double>();
 
 
     /// <summary>
@@ -477,6 +484,84 @@ public class Constants
         return GetForGroup(_staleSurveyResurfacingIri, deteriorationGroup, StaleSurveyResurfacingSet, "iri");
     }
 
+    // ----- Pre-repairs ---------------------------------------------------------------------------
+    //
+    // A PRE-REPAIR IS THE THIRD TREATMENT CLASS, AND IT WORKS DIFFERENTLY FROM THE OTHER TWO. A
+    // resurfacing resets the clock; a rehabilitation resets the clock and imposes as-new values. A
+    // pre-repair touches NEITHER the clock nor the deflection. It acts on the persistent deviate -
+    // the segment's excess distress relative to what its age predicts - which is exactly what
+    // localised repairs remove, and is self-limiting for free: a segment already average for its age
+    // has nothing anomalous to repair and gets no benefit.
+    //
+    // EVERY NUMBER IN THIS BLOCK IS ENGINEERING JUDGEMENT AND NONE OF THEM CAN BE CALIBRATED. This
+    // input file has no treatment history and no longitudinal record, and the six maintenance extent
+    // columns carry no date, so a repair effect cannot be separated from the selection that caused
+    // it. The cross-section shows exactly that selection signature: maintained segments read WORSE
+    // rut (3.98 mm against 3.45 mm) and worse cracking (7.96% against 5.54%), because patching is
+    // targeted at bad roads. So the network run is where these get tested, not the survey data.
+
+    /// <summary>
+    /// The most cracking, in percentage points, a pre-repair can physically remove. JUDGEMENT.
+    ///
+    /// <para>SUBTRACTIVE, NOT A TARGET, and that is what makes the model behave sensibly with no
+    /// parameter tuned to make it so: post = max(0, pre - this). A segment at 8% or 15% cracking is
+    /// repaired completely and the repair is as good as a rebuild on that variable that year; a
+    /// segment at 45% keeps a 25-point residual that dominates everything afterwards, and is still at
+    /// 42% ten years later against 12% after a rehabilitation. It also removes any need for a
+    /// "diminishing returns on repeat repairs" rule, because each repair leaves a residual that the
+    /// next one subtracts from.</para>
+    /// </summary>
+    public double PreRepairMaxExtentCrackPercent { get { return _preRepairMaxExtentCrackPercent; } }
+
+    /// <summary>
+    /// The most rut depth, in mm, a pre-repair can physically remove. JUDGEMENT.
+    /// <para>This is the only lever short of rebuilding that touches CHIPSEAL rut at all - a reseal
+    /// does nothing to it, because a seal follows the shape of what it is laid on.</para>
+    /// </summary>
+    public double PreRepairMaxExtentRutMillimetres { get { return _preRepairMaxExtentRutMillimetres; } }
+
+    /// <summary>
+    /// The most roughness, in IRI, a pre-repair can remove. ZERO as delivered, and deliberately so:
+    /// patching does not smooth a road and often roughens it, and crediting an unearned roughness gain
+    /// understates renewal need. The switch is exposed rather than hard-coded so that an engineer can
+    /// turn it on from lookups.xlsx without a rebuild.
+    /// </summary>
+    public double PreRepairMaxExtentIri { get { return _preRepairMaxExtentIri; } }
+
+    /// <summary>
+    /// The fraction of a pre-repair's benefit that is permanent; the rest decays with the time
+    /// constant below. JUDGEMENT.
+    /// <para>THE ONE THAT MATTERS OVER A THIRTY YEAR BUDGET. It decides where the segment ends up,
+    /// while the decay constant only decides how fast it gets there. Zero says a structural digout
+    /// left nothing behind, which is too harsh for a repair that replaces material; one makes a
+    /// pre-repair a rehabilitation. Bracket the assumption by running it at both ends before tuning
+    /// it: the spread between those two budgets is how much of the answer rests on it.</para>
+    /// </summary>
+    public double PreRepairRetainedFraction { get { return _preRepairRetainedFraction; } }
+
+    /// <summary>
+    /// A pre-repair may not leave a segment better than this multiple of the rehabilitation reset
+    /// value for the same quantity. JUDGEMENT.
+    /// <para>WHY IT IS NEEDED. A pre-repair combined with an asphalt overlay in the same year - the
+    /// ThinAC_H treatment - resets the clock AND credits the deviate, so its year zero is already
+    /// close to a rehabilitation. Without this floor the two could compound to a condition better than
+    /// a full rebuild, which is nonsense. What still separates them legitimately is that a pre-repair
+    /// leaves the deflection alone and earns no as-new offset.</para>
+    /// </summary>
+    public double PreRepairGuardFactor { get { return _preRepairGuardFactor; } }
+
+    /// <summary>
+    /// Time constant in years over which the non-permanent part of a pre-repair's benefit decays away,
+    /// for this deterioration group. JUDGEMENT.
+    /// <para>Close to cosmetic for a thirty year budget - it changes the apparent rate in the first few
+    /// years far more than it changes where the segment ends up, which is the retained fraction's
+    /// job.</para>
+    /// </summary>
+    public double GetPreRepairDecayTauYears(string deteriorationGroup)
+    {
+        return GetForGroup(_preRepairDecayTauYears, deteriorationGroup, PreRepairSet, "decay_tau_yrs");
+    }
+
     /// <summary>
     /// Reads one group-keyed value, naming the group, the set and the key it was looking for. The
     /// dictionaries are filled at setup, so this only fires if a segment resolves to a group that the
@@ -506,6 +591,7 @@ public class Constants
     private const string RehabResetSet = "rehab_resets";
     private const string RehabOffsetSet = "rehab_offsets";
     private const string StaleSurveyResurfacingSet = "stale_survey_resurf";
+    private const string PreRepairSet = "pre_repair";
     private const string DefaultKey = "default";
 
     /// <summary>
@@ -609,6 +695,12 @@ public class Constants
         _rehabResetRutMillimetres = GetNumber(lookupSets, RehabResetSet, "rut_mm");
         _rehabResetIri = GetNumber(lookupSets, RehabResetSet, "iri");
 
+        _preRepairMaxExtentCrackPercent = GetNumber(lookupSets, PreRepairSet, "max_extent_crack_pct");
+        _preRepairMaxExtentRutMillimetres = GetNumber(lookupSets, PreRepairSet, "max_extent_rut_mm");
+        _preRepairMaxExtentIri = GetNumber(lookupSets, PreRepairSet, "max_extent_iri");
+        _preRepairRetainedFraction = GetNumber(lookupSets, PreRepairSet, "retained_fraction");
+        _preRepairGuardFactor = GetNumber(lookupSets, PreRepairSet, "guard_factor");
+
         foreach (string group in DeteriorationModels.ModelGroups)
         {
             _rehabResetDeflection[group] = GetNumber(lookupSets, RehabResetSet, $"d0_{group}");
@@ -617,6 +709,7 @@ public class Constants
             _rehabOffsetCrackOnset[group] = GetNumber(lookupSets, RehabOffsetSet, $"crack_onset_{group}");
             _staleSurveyResurfacingRut[group] = GetNumber(lookupSets, StaleSurveyResurfacingSet, $"rut_{group}");
             _staleSurveyResurfacingIri[group] = GetNumber(lookupSets, StaleSurveyResurfacingSet, $"iri_{group}");
+            _preRepairDecayTauYears[group] = GetNumber(lookupSets, PreRepairSet, $"decay_tau_yrs_{group}");
         }
 
     }

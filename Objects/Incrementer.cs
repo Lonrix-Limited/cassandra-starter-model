@@ -1,4 +1,4 @@
-﻿using JCass_ModelCore.Models;
+using JCass_ModelCore.Models;
 
 namespace StarterModel.Objects;
 
@@ -58,6 +58,12 @@ public class Incrementer
         // chipseal rutting inherited by the new seal rather than renewed by it. Only a rehabilitation
         // sends this back to zero. Asphalt never reads it.
         segment.RutGrowthYears = segment.RutGrowthYears + 1;
+
+        // Years since the segment's last pre-repair, which is what the three pre-repair credits decay
+        // on. It advances here like any other clock; it is set back to zero only by a pre-repair, and
+        // cleared with the credits themselves by a rehabilitation. Zero for every segment that has
+        // never had one, in which case there is no credit for it to decay.
+        segment.PreRepairYears = segment.PreRepairYears + 1;
 
         // Note: surface life achieved and surface remaining life are automatically calculated based on the surface age and expected life
 

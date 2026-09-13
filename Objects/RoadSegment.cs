@@ -744,6 +744,53 @@ public class RoadSegment
     /// </summary>
     public bool HasBeenRehabilitated { get; set; }
 
+    /// <summary>
+    /// Size of the credit a pre-repair left on the segment's CRACKING SEVERITY deviate, in deviate
+    /// units, before decay. Zero for a segment that has never had one.
+    ///
+    /// <para>WHAT A PRE-REPAIR IS, BECAUSE IT IS NOT A SMALL RESURFACING. Preseal repairs on chipseal
+    /// and heavy maintenance on asphalt are the third treatment class, and they are defined by what
+    /// they do NOT touch: not the clock, and not the deflection. They act on the persistent deviate,
+    /// which carries the segment's excess distress relative to what its age predicts - exactly what
+    /// localised repairs remove. That makes the benefit self-limiting with no rule to enforce it: a
+    /// segment already average for its age has nothing anomalous to repair and gets nothing.</para>
+    ///
+    /// <para>CRACKING IS CREDITED ON SEVERITY AND NOT ON ONSET, and the distinction is the point:
+    /// reduce how much the segment has cracked, do not claim the repair made it uncracked. The onset
+    /// position is left exactly as it was.</para>
+    ///
+    /// <para>The credit decays towards the permanent fraction in the 'pre_repair' lookup set, on the
+    /// clock below. A rehabilitation clears it, because a rehabilitation redraws the deviates the
+    /// credit was measured against.</para>
+    /// </summary>
+    public double PreRepairCreditCracking { get; set; }
+
+    /// <summary>
+    /// Size of the credit a pre-repair left on the segment's RUTTING deviate, in deviate units, before
+    /// decay.
+    /// <para>This is the case that matters most, because a reseal does nothing at all to chipseal rut -
+    /// the seal follows the shape of what it is laid on. Without a pre-repair reset there is no lever
+    /// between no effect and rebuilding.</para>
+    /// </summary>
+    public double PreRepairCreditRut { get; set; }
+
+    /// <summary>
+    /// Size of the credit a pre-repair left on the segment's ROUGHNESS deviate, in deviate units.
+    /// <para>ZERO in every period as delivered, because the roughness repair extent in the 'pre_repair'
+    /// lookup set is zero: patching does not smooth a road and often roughens it. It is carried as
+    /// state rather than left out so that the switch in the spreadsheet genuinely works.</para>
+    /// </summary>
+    public double PreRepairCreditIri { get; set; }
+
+    /// <summary>
+    /// Years since the segment's last pre-repair, and the clock the three credits above decay on:
+    /// credit = size * (retained + (1 - retained) * exp(-years / tau)).
+    /// <para>Set to zero at a pre-repair and advanced by one every other period, including across a
+    /// resurfacing - a reseal does not undo a digout, and the deviate it credits is retained too. A
+    /// rehabilitation returns it to zero along with the credits themselves.</para>
+    /// </summary>
+    public double PreRepairYears { get; set; }
+
     /// <summary>Value of CrackingInitSource, RutInitSource or IriInitSource for a surveyed segment.</summary>
     public const int InitSourceSurveyed = 0;
 
@@ -1164,6 +1211,12 @@ public class RoadSegment
         numModParamValues("par_rut_init_src", this.RutInitSource);
         numModParamValues("par_iri_init_src", this.IriInitSource);
         numModParamValues("par_rehab_flag", Convert.ToDouble(this.HasBeenRehabilitated));
+
+        // -- Pre-repair credits. Zero for every segment until one is applied --
+        numModParamValues("par_prerep_dz_crack", this.PreRepairCreditCracking);
+        numModParamValues("par_prerep_dz_rut", this.PreRepairCreditRut);
+        numModParamValues("par_prerep_dz_iri", this.PreRepairCreditIri);
+        numModParamValues("par_prerep_yrs", this.PreRepairYears);
     }
     #endregion
 

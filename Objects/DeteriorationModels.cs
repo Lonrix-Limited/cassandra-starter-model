@@ -1,4 +1,4 @@
-﻿using JCass_ModelCore.Models;
+using JCass_ModelCore.Models;
 
 namespace StarterModel.Objects;
 
@@ -175,7 +175,12 @@ public class DeteriorationModels
         double mu = this.CrackSeverityMu(segment, surfaceAgeYears);
         double truncationPoint = this.SeverityTruncationPoint(mu, sigma);
 
-        double deviate = this.ClampSeverityDeviate(truncationPoint, segment.CrackSeverityQuantile);
+        // The pre-repair credit comes off the SEVERITY deviate and nowhere else. Onset is left alone
+        // on purpose - a repair reduces how much the segment has cracked, it does not make the segment
+        // uncracked - so CrackOnsetProbability above carries no credit term.
+        double deviate = this.ClampSeverityDeviate(truncationPoint, segment.CrackSeverityQuantile)
+                         - this.CurrentPreRepairCreditCracking(segment);
+
         return Math.Exp(mu + sigma * deviate);
     }
 
@@ -276,7 +281,8 @@ public class DeteriorationModels
     {
         // exp(mu) * exp(sigma * deviate), combined into one exponential so that sigma is read from the
         // fit in exactly one place and cannot drift out of step with the deviate that was inverted.
-        double rut = Math.Exp(this.RutMu(segment, surfaceAgeYears) + this.RutSigma(segment) * segment.RutDeviate);
+        double rut = Math.Exp(this.RutMu(segment, surfaceAgeYears)
+                              + this.RutSigma(segment) * this.EffectiveRutDeviate(segment));
 
         if (segment.DeteriorationGroup == GroupChipSeal)
         {
@@ -327,7 +333,8 @@ public class DeteriorationModels
     /// </summary>
     public double GetRoughness(RoadSegment segment, double surfaceAgeYears, double crackingPercent, double rutMillimetres)
     {
-        double iri = Math.Exp(this.IriMu(segment, surfaceAgeYears) + this.IriSigma(segment) * segment.IriDeviate);
+        double iri = Math.Exp(this.IriMu(segment, surfaceAgeYears)
+                              + this.IriSigma(segment) * this.EffectiveIriDeviate(segment));
 
         iri *= (1.0 + _constants.DetFeedbackCrackOnIri * crackingPercent / 100.0);
         iri *= (1.0 + _constants.DetFeedbackRutOnIri * rutMillimetres / 10.0);
@@ -353,6 +360,16 @@ public class DeteriorationModels
     /// </summary>
     public void UpdateConditions(RoadSegment segment, double surfaceAgeYears)
     {
+        this.UpdateConditions(segment, surfaceAgeYears, applyPreRepairGuard: false);
+    }
+
+    /// <summary>
+    /// The same update, with the option of enforcing the pre-repair guard as each value is produced.
+    /// Only the pre-repair path in the Resetter passes true; see ApplyPreRepairGuard for what it does
+    /// and why it has to happen here rather than before the clocks moved.
+    /// </summary>
+    public void UpdateConditions(RoadSegment segment, double surfaceAgeYears, bool applyPreRepairGuard)
+    {
         double rutBefore = segment.RutParameterValue;
         double iriBefore = segment.Iri;
 
@@ -360,12 +377,27 @@ public class DeteriorationModels
         //    from the left-truncated distribution, or it has not, in which case it carries the
         //    sub-threshold value it has held since the surface was laid.
         segment.PctCracking = this.GetCracking(segment, surfaceAgeYears);
+        if (applyPreRepairGuard)
+        {
+            this.GuardCrackingCredit(segment, surfaceAgeYears);
+            segment.PctCracking = this.GetCracking(segment, surfaceAgeYears);
+        }
 
         // 2. Rutting, which takes cracking as a feedback term.
         segment.RutParameterValue = this.GetRutting(segment, surfaceAgeYears, segment.PctCracking);
+        if (applyPreRepairGuard)
+        {
+            this.GuardRutCredit(segment, surfaceAgeYears, segment.PctCracking);
+            segment.RutParameterValue = this.GetRutting(segment, surfaceAgeYears, segment.PctCracking);
+        }
 
         // 3. Roughness, which takes both cracking and rutting as feedback terms.
         segment.Iri = this.GetRoughness(segment, surfaceAgeYears, segment.PctCracking, segment.RutParameterValue);
+        if (applyPreRepairGuard)
+        {
+            this.GuardIriCredit(segment, surfaceAgeYears, segment.PctCracking, segment.RutParameterValue);
+            segment.Iri = this.GetRoughness(segment, surfaceAgeYears, segment.PctCracking, segment.RutParameterValue);
+        }
 
         // Naasra needs no update: it is derived from Iri on every read.
 
@@ -465,6 +497,257 @@ public class DeteriorationModels
 
     #endregion
 
+
+    #region Pre-repairs - a credit on the deviate, not a change of clock
+
+    // A PRE-REPAIR IS THE THIRD TREATMENT CLASS AND IT IS DEFINED BY WHAT IT DOES NOT TOUCH. Preseal
+    // repairs on chipseal and heavy maintenance on asphalt reset more than a reseal and less than a
+    // rehabilitation. Set out against the other two:
+    //
+    //                     clock         persistent deviate    permanent offset    deflection
+    //   resurfacing       -> 0          kept                  -                   unchanged
+    //   rehabilitation    -> 0          redrawn               rehab offset        -> group median
+    //   PRE-REPAIR        unchanged     CREDITED, decaying    -                   unchanged
+    //
+    // THE CLOCK BEING UNTOUCHED IS WHAT STOPS IT BEHAVING LIKE A RESURFACING. The deviate is the right
+    // lever because it carries the segment's excess distress relative to what its age predicts, which
+    // is exactly what localised repairs remove - and that makes the benefit self-limiting with no rule
+    // to enforce it, because a segment already average for its age has nothing anomalous to repair.
+    //
+    // THE CREDIT IS SUBTRACTIVE IN CONDITION SPACE, NOT A CLAMP TO A TARGET, and that single choice is
+    // what makes the effectiveness depend on how bad the segment was, with no parameter tuned to make
+    // it so. At a repair extent of 20 percentage points of cracking: a segment at 8% or 15% comes out
+    // at zero and the repair is as good as a rebuild on that variable that year; a segment at 45%
+    // keeps a 25-point residual and is still at 42% ten years later, against 12% after a
+    // rehabilitation. It also means repeated pre-repairs cannot stack up to a rehabilitation, because
+    // each one leaves a residual the next one subtracts from - so no separate diminishing-returns rule
+    // is needed anywhere.
+    //
+    // EVERY NUMBER BEHIND THIS IS JUDGEMENT AND LIVES IN THE 'pre_repair' LOOKUP SET. None of them can
+    // be calibrated from the client's data: there is no treatment history, and the maintenance extent
+    // columns carry no date, so a repair effect cannot be separated from the selection that caused it.
+
+    /// <summary>
+    /// The decayed pre-repair credit currently in force on the CRACKING SEVERITY deviate, in deviate
+    /// units. Zero for a segment that has never had a pre-repair.
+    /// </summary>
+    public double CurrentPreRepairCreditCracking(RoadSegment segment)
+    {
+        return this.DecayedCredit(segment, segment.PreRepairCreditCracking);
+    }
+
+    /// <summary>The decayed pre-repair credit currently in force on the RUTTING deviate.</summary>
+    public double CurrentPreRepairCreditRut(RoadSegment segment)
+    {
+        return this.DecayedCredit(segment, segment.PreRepairCreditRut);
+    }
+
+    /// <summary>
+    /// The decayed pre-repair credit currently in force on the ROUGHNESS deviate. Zero in every period
+    /// as delivered, because the roughness repair extent is zero.
+    /// </summary>
+    public double CurrentPreRepairCreditIri(RoadSegment segment)
+    {
+        return this.DecayedCredit(segment, segment.PreRepairCreditIri);
+    }
+
+    /// <summary>
+    /// How much of a pre-repair's credit still applies, given how long ago it was:
+    /// size * (retained + (1 - retained) * exp(-years / tau)).
+    ///
+    /// <para>The retained fraction is the part that is permanent - a digout replaces material, so full
+    /// reversion is too harsh and full permanence would make a pre-repair a rehabilitation. THE TWO
+    /// PARAMETERS DO DIFFERENT JOBS, and it is worth knowing which before tuning either: the retained
+    /// fraction decides where the segment ends up, and tau only decides how quickly it gets there. Over
+    /// a thirty year budget the retained fraction is what matters and tau is close to cosmetic.</para>
+    /// </summary>
+    private double DecayedCredit(RoadSegment segment, double creditAtRepair)
+    {
+        if (creditAtRepair <= 0.0) return 0.0;
+
+        double retained = _constants.PreRepairRetainedFraction;
+        double tau = _constants.GetPreRepairDecayTauYears(segment.DeteriorationGroup);
+        double years = Math.Max(0.0, segment.PreRepairYears);
+
+        // A tau of zero means the transient part is gone immediately, leaving only the retained part.
+        // Written out rather than left to divide by zero, which would give NaN for every later period.
+        double transient = tau > 0.0 ? Math.Exp(-years / tau) : 0.0;
+
+        return creditAtRepair * (retained + (1.0 - retained) * transient);
+    }
+
+    /// <summary>
+    /// The rutting deviate the model actually evaluates at: the persistent draw, less the credit any
+    /// pre-repair left on it.
+    /// </summary>
+    public double EffectiveRutDeviate(RoadSegment segment)
+    {
+        return segment.RutDeviate - this.CurrentPreRepairCreditRut(segment);
+    }
+
+    /// <summary>The roughness deviate the model actually evaluates at.</summary>
+    public double EffectiveIriDeviate(RoadSegment segment)
+    {
+        return segment.IriDeviate - this.CurrentPreRepairCreditIri(segment);
+    }
+
+    /// <summary>
+    /// Works out what a pre-repair removed from this segment and records it as a credit on each
+    /// deviate, in deviate units.
+    ///
+    /// <para>CALL THIS BEFORE ANY CLOCK IS MOVED. The credit is the displacement between where the
+    /// segment is now and where the repair leaves it, and both ends have to be read at the same age or
+    /// the displacement means nothing. One of the three arrangements - an asphalt overlay with repairs
+    /// in the same year - does move the clock immediately afterwards.</para>
+    ///
+    /// <para>For each variable the post-repair condition is the current value less the repair extent,
+    /// floored at zero, and the credit is whatever moves the segment's deviate onto that value. The
+    /// resulting deviate is clamped at minus the configured number of standard deviations - the same
+    /// clamp the year-zero inversion applies, and load-bearing rather than decorative here: driving a
+    /// distress to zero implies a deviate of minus infinity, which would lock the segment into
+    /// permanently near-zero distress, better than a rehabilitation and plainly nonsense.</para>
+    ///
+    /// <para>EACH CREDIT IS MEASURED AGAINST THE SEGMENT'S STORED DEVIATE, not against its already
+    /// credited position, so an earlier repair's credit is subsumed rather than added to. That is what
+    /// keeps a run of repeat repairs from compounding past the clamp.</para>
+    ///
+    /// <para>CRACKING IS CREDITED ONLY IF THE SEGMENT HAS ACTUALLY CRACKED, and only on the severity
+    /// draw. Below the onset threshold it carries a held sub-threshold value that no deviate feeds, and
+    /// a segment under one per cent of cracking has nothing for a repair to remove. The onset position
+    /// is never touched: reduce how much the segment has cracked, do not claim the repair made it
+    /// uncracked.</para>
+    /// </summary>
+    public void ApplyPreRepairCredits(RoadSegment segment)
+    {
+        double surfaceAge = segment.SurfaceAge;
+
+        // --- Cracking: on the severity deviate, never on onset ---
+        double crackingCredit = 0.0;
+        if (segment.CrackOnsetPosition < this.CrackOnsetProbability(segment, surfaceAge))
+        {
+            double sigma = this.ModelFor(_coefficients.CrackSeverity, segment, "cracking severity").Sigma;
+            double mu = this.CrackSeverityMu(segment, surfaceAge);
+            double truncationPoint = this.SeverityTruncationPoint(mu, sigma);
+
+            double deviateNow = this.ClampSeverityDeviate(truncationPoint, segment.CrackSeverityQuantile);
+            double post = Math.Max(0.0, segment.PctCracking - _constants.PreRepairMaxExtentCrackPercent);
+            double deviatePost = Math.Max(-_constants.DetMultiplierClampSd,
+                                          (Math.Log(Math.Max(post, MinimumObservableCondition)) - mu) / sigma);
+
+            crackingCredit = Math.Max(0.0, deviateNow - deviatePost);
+        }
+
+        // --- Rutting: on the persistent rut deviate. The inversion undoes the chipseal growth term and
+        //     the cracking feedback, so the credit is in the units the lognormal core works in ---
+        double rutPost = Math.Max(0.0, segment.RutParameterValue - _constants.PreRepairMaxExtentRutMillimetres);
+        double rutDeviatePost = this.InvertRutting(segment, rutPost, segment.PctCracking, out _)
+                                - this.CurrentPreRepairCreditRut(segment);
+        double rutCredit = Math.Max(0.0, segment.RutDeviate - rutDeviatePost);
+
+        // --- Roughness: zero as delivered, because the repair extent is zero ---
+        double iriPost = Math.Max(0.0, segment.Iri - _constants.PreRepairMaxExtentIri);
+        double iriDeviatePost = this.InvertRoughness(segment, iriPost, segment.PctCracking, segment.RutParameterValue, out _)
+                                - this.CurrentPreRepairCreditIri(segment);
+        double iriCredit = Math.Max(0.0, segment.IriDeviate - iriDeviatePost);
+
+        segment.PreRepairCreditCracking = crackingCredit;
+        segment.PreRepairCreditRut = rutCredit;
+        segment.PreRepairCreditIri = iriCredit;
+
+        // Restarts the decay, so the full credit applies in the repair year.
+        segment.PreRepairYears = 0.0;
+    }
+
+    /// <summary>
+    /// Clears every pre-repair credit. Called by a rehabilitation, which redraws the very deviates the
+    /// credits were measured against: left in place they would subtract from a fresh draw and hand a
+    /// rebuilt pavement a discount it did not earn.
+    /// </summary>
+    public static void ClearPreRepairCredits(RoadSegment segment)
+    {
+        segment.PreRepairCreditCracking = 0.0;
+        segment.PreRepairCreditRut = 0.0;
+        segment.PreRepairCreditIri = 0.0;
+        segment.PreRepairYears = 0.0;
+    }
+
+    // ----- The guard: a pre-repair may not out-perform a rebuild ----------------------------------
+    //
+    // WHY IT EXISTS. One of the three arrangements a pre-repair arrives in - an asphalt overlay with
+    // heavy maintenance repairs in the same year - resets the clock AND credits the deviate, so its
+    // year zero is already close to a rehabilitation. Without a floor the two can compound to a
+    // condition better than a full rebuild. The floor is a multiple of the rehabilitation reset value
+    // for the same quantity, from the 'pre_repair' lookup set.
+    //
+    // IT IS ENFORCED BY SHRINKING THE CREDIT, NOT BY CLAMPING THE REPORTED VALUE. Clamping the value
+    // would leave the segment reporting one condition while its deviate said another, and the next
+    // period would step to a third with no treatment behind it. Shrinking the credit keeps the state
+    // and the reported value in agreement for the rest of the segment's life.
+    //
+    // ONLY THE REPAIR YEAR NEEDS CHECKING, which is why these are called from the guarded update and
+    // nowhere else: from the next period onwards the credit only decays and the clock only advances,
+    // so every later value is higher than this one.
+
+    private void GuardCrackingCredit(RoadSegment segment, double surfaceAgeYears)
+    {
+        if (segment.PreRepairCreditCracking <= 0.0) return;
+
+        double floor = _constants.PreRepairGuardFactor * _constants.RehabResetCrackingPercent;
+        if (floor <= 0.0 || segment.PctCracking >= floor) return;
+
+        double sigma = this.ModelFor(_coefficients.CrackSeverity, segment, "cracking severity").Sigma;
+        double mu = this.CrackSeverityMu(segment, surfaceAgeYears);
+        double truncationPoint = this.SeverityTruncationPoint(mu, sigma);
+        double deviateNow = this.ClampSeverityDeviate(truncationPoint, segment.CrackSeverityQuantile);
+
+        segment.PreRepairCreditCracking = Math.Max(0.0, MaximumCredit(deviateNow, mu, sigma, floor));
+    }
+
+    private void GuardRutCredit(RoadSegment segment, double surfaceAgeYears, double crackingPercent)
+    {
+        if (segment.PreRepairCreditRut <= 0.0) return;
+
+        double floor = _constants.PreRepairGuardFactor * _constants.RehabResetRutMillimetres;
+        if (floor <= 0.0 || segment.RutParameterValue >= floor) return;
+
+        // Undo everything the forward model adds outside the lognormal core, exactly as InvertRutting
+        // does, so that the floor is expressed in the same terms as the core the credit acts on.
+        double core = floor / (1.0 + _constants.DetFeedbackCrackOnRut * crackingPercent / 100.0);
+        if (segment.DeteriorationGroup == GroupChipSeal) core -= this.ChipSealRutGrowth(segment);
+        if (core <= 0.0) return;   // the accumulated growth alone already clears the floor
+
+        segment.PreRepairCreditRut = Math.Max(0.0, MaximumCredit(segment.RutDeviate,
+                                                                 this.RutMu(segment, surfaceAgeYears),
+                                                                 this.RutSigma(segment), core));
+    }
+
+    private void GuardIriCredit(RoadSegment segment, double surfaceAgeYears, double crackingPercent, double rutMillimetres)
+    {
+        if (segment.PreRepairCreditIri <= 0.0) return;
+
+        double floor = _constants.PreRepairGuardFactor * _constants.RehabResetIri;
+        if (floor <= 0.0 || segment.Iri >= floor) return;
+
+        double core = floor / (1.0 + _constants.DetFeedbackCrackOnIri * crackingPercent / 100.0);
+        core /= (1.0 + _constants.DetFeedbackRutOnIri * rutMillimetres / 10.0);
+        if (core <= 0.0) return;
+
+        segment.PreRepairCreditIri = Math.Max(0.0, MaximumCredit(segment.IriDeviate,
+                                                                 this.IriMu(segment, surfaceAgeYears),
+                                                                 this.IriSigma(segment), core));
+    }
+
+    /// <summary>
+    /// The largest credit that still leaves the lognormal core of a model at or above a given floor:
+    /// solves exp(mu + sigma * (stored - credit)) = floor for the credit.
+    /// </summary>
+    private static double MaximumCredit(double storedDeviate, double mu, double sigma, double coreFloor)
+    {
+        return storedDeviate - (Math.Log(coreFloor) - mu) / sigma;
+    }
+
+    #endregion
+
     #region Year zero - turning an observation into a persistent draw
 
     /// <summary>
@@ -515,7 +798,13 @@ public class DeteriorationModels
             target -= this.ChipSealRutGrowth(segment);
         }
 
-        return this.InvertLevelModel(target, this.RutMu(segment, segment.SurfaceAge), this.RutSigma(segment), out wasClamped);
+        // MIRROR THE PRE-REPAIR CREDIT. The forward model evaluates at (stored deviate - credit), so the
+        // deviate this returns - the one the caller stores - has to carry the credit back. At year zero
+        // the credit is zero for every segment and this line does nothing, which is exactly why it is
+        // easy to leave out and why leaving it out would look fine until years into a run.
+        double effective = this.InvertLevelModel(target, this.RutMu(segment, segment.SurfaceAge),
+                                                 this.RutSigma(segment), out wasClamped);
+        return effective + this.CurrentPreRepairCreditRut(segment);
     }
 
     /// <summary>
@@ -527,7 +816,10 @@ public class DeteriorationModels
         double target = observedIri / (1.0 + _constants.DetFeedbackCrackOnIri * crackingPercent / 100.0);
         target /= (1.0 + _constants.DetFeedbackRutOnIri * rutMillimetres / 10.0);
 
-        return this.InvertLevelModel(target, this.IriMu(segment, segment.SurfaceAge), this.IriSigma(segment), out wasClamped);
+        // Mirrors the pre-repair credit for the same reason as InvertRutting above.
+        double effective = this.InvertLevelModel(target, this.IriMu(segment, segment.SurfaceAge),
+                                                 this.IriSigma(segment), out wasClamped);
+        return effective + this.CurrentPreRepairCreditIri(segment);
     }
 
     /// <summary>
@@ -550,11 +842,17 @@ public class DeteriorationModels
         onsetPosition = random.NextDouble() * onsetProbability;
 
         double observedDeviate = (Math.Log(Math.Max(observedCracking, MinimumObservableCondition)) - mu) / sigma;
-        double quantile = (NormalDistribution.Phi(observedDeviate) - truncationPoint) / (1.0 - truncationPoint);
+
+        // Mirrors the pre-repair credit, which GetCracking subtracts from the severity deviate. The
+        // quantile stored has to be the one that lands on (observed deviate + credit), so that taking
+        // the credit off again reproduces the reading. Zero at year zero, as everywhere else.
+        double targetDeviate = observedDeviate + this.CurrentPreRepairCreditCracking(segment);
+
+        double quantile = (NormalDistribution.Phi(targetDeviate) - truncationPoint) / (1.0 - truncationPoint);
         severityQuantile = Math.Clamp(quantile, 0.0, 1.0);
 
         // The recursion clamps the deviate when it evaluates, so record here whether that will bite.
-        wasClamped = observedDeviate > _constants.DetMultiplierClampSd + ClampDetectionTolerance;
+        wasClamped = targetDeviate > _constants.DetMultiplierClampSd + ClampDetectionTolerance;
     }
 
     /// <summary>

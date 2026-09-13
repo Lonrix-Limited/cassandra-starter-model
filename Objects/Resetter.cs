@@ -20,6 +20,20 @@ namespace StarterModel.Objects;
 /// first and leaves the second running, because a seal follows the shape of what it is laid on and
 /// inherits the rut rather than renewing it. A rehabilitation resets both.</para>
 ///
+/// <para>THERE ARE THREE TREATMENT CLASSES, NOT TWO, AND THE THIRD IS NOT A SMALL VERSION OF EITHER.
+/// Beside resurfacing and rehabilitation, Cassandra applies PRE-REPAIRS - preseal repairs on chipseal,
+/// heavy maintenance on asphalt. A pre-repair touches neither clock and does not touch the deflection.
+/// It acts on the segment's persistent deviate, subtractively and with the credit decaying, because
+/// the deviate is what carries a segment's excess distress relative to what its age predicts - which
+/// is exactly what localised repairs remove. See the pre-repair region of DeteriorationModels.</para>
+///
+/// <para>PRE-REPAIRS AND SURFACE RENEWAL ARE NOT ALTERNATIVES HERE, and this class used to treat them
+/// as if they were. They are two independent questions about a treatment, and one treatment answers
+/// yes to both. The three arrangements the specification names all map onto treatments this model
+/// already produces: ThinAC_H is an asphalt overlay WITH repairs in the same year, HMaint_AC is
+/// repairs alone, and PreSeal is repairs followed by a ChipSeal_H a year or two later, which the
+/// surface function '1a' is what forces.</para>
+///
 /// <para>A REHABILITATION IS THE ONE TREATMENT THE FITTED MODELS CANNOT DESCRIBE, so it is the one
 /// place values are imposed. Every segment in the fitted data is a surfacing over an old pavement -
 /// median pavement age 63 years, not one reconstructed pavement in the file - so the models' age-zero
@@ -36,6 +50,15 @@ namespace StarterModel.Objects;
 public class Resetter
 {
 
+    /// <summary>
+    /// The one treatment that is a pre-repair AND a resurfacing in the same year, lower case: an
+    /// asphalt overlay or inlay that includes heavy maintenance repairs. The treatments trigger already
+    /// costs it as both, splitting it between the Resurfacing and Pre-Repairs budget categories.
+    /// <para>Matched in full rather than by prefix, because 'thinac' also matches ThinAC_P, which is
+    /// the same overlay with no or minimal repairs and earns no repair credit.</para>
+    /// </summary>
+    private const string PreRepairWithOverlayTreatment = "thinac_h";
+
     private ModelBase _frameworkModel;
     private StarterModel _domainModel;
 
@@ -51,8 +74,16 @@ public class Resetter
         if (treatment is null) return segment;
 
         string treatmentName = treatment.TreatmentName.ToLower();
+
+        // THESE ARE TWO INDEPENDENT QUESTIONS AND ThinAC_H ANSWERS YES TO BOTH - an asphalt overlay
+        // that includes heavy maintenance repairs, which is why the treatments trigger already splits
+        // its cost between the Resurfacing and Pre-Repairs budget categories. Treating pre-repair and
+        // resurfacing as alternative branches, as this method used to, left that arrangement nowhere
+        // to go: it reset the clock and earned no repair credit.
         bool isRehab = treatmentName.StartsWith("rehab");
-        bool isPreseal = treatmentName.StartsWith("hmaint") || treatmentName.StartsWith("preseal");
+        bool isPreRepair = treatmentName.StartsWith("hmaint") || treatmentName.StartsWith("preseal")
+                           || treatmentName == PreRepairWithOverlayTreatment;
+        bool renewsSurface = !treatmentName.StartsWith("hmaint") && !treatmentName.StartsWith("preseal");
 
         // Every draw below comes from here. See SegmentRandom for why it is not model.Random.
         Random random = SegmentRandom.ForSegment(_frameworkModel.RandomSeed, segment.ElementIndex, period);
@@ -76,6 +107,23 @@ public class Resetter
 
         // No need to update Pavement Life Achieved and HCV Risk because it is automatically calculated based on the HCV and Pavement Life Achieved
 
+        // WHAT A PRE-REPAIR REMOVED IS WORKED OUT HERE, BEFORE ANY CLOCK MOVES. The credit is the
+        // distance between where the segment is now and where the repair leaves it, and both ends have
+        // to be read at the same surface age or it means nothing - which matters because the overlay
+        // arrangement below sends that age to zero a few lines later. A rehabilitation does not compute
+        // one at all: it redraws the deviates a credit would have been measured against.
+        if (isPreRepair && !isRehab)
+        {
+            _domainModel.DeteriorationModels.ApplyPreRepairCredits(segment);
+        }
+        else
+        {
+            // Every other period the credit simply ages, and decays with it. It survives a resurfacing
+            // on purpose - a reseal does not undo a digout, and the deviate the credit sits on is
+            // retained across a reseal too.
+            segment.PreRepairYears = segment.PreRepairYears + 1;
+        }
+
         segment.SurfaceMaterial = _frameworkModel.GetLookupValueText("treat_surf_materials", treatment.TreatmentName);
         segment.SurfaceClass = _frameworkModel.GetLookupValueText("treat_surf_class", treatment.TreatmentName);
 
@@ -85,14 +133,22 @@ public class Resetter
         // period it lands in, and correct itself silently the period after.
         segment.DeteriorationGroup = _domainModel.Constants.GetDeteriorationGroup(segment.SurfaceClass);
 
-        // If rehab, number of surfacing becomes 1. Otherwise, increase number of surfacings but only if it is a chipseal. If AC, then it remains the same.
+        // A rehabilitation starts the surfacing again; a resurfacing adds a layer to it; a pre-repair
+        // that renews no surface adds nothing at all.
+        //
+        // THAT LAST CASE WAS WRONG UNTIL THE PRE-REPAIR RESET LANDED, and it was inherited rather than
+        // decided. PreSeal used to add 10 mm of chip and a layer for a treatment that lays no chip -
+        // and then the ChipSeal_H that follows it a year or two later added another 15 mm and another
+        // layer for the seal that actually went down. HMaint_AC escaped only because asphalt's
+        // 'thickness to add' happens to be zero. Neither quantity drives any model; both are reported
+        // as par_surf_thick and par_surf_layers, so this was a reporting defect and not a forecast one.
         if (isRehab)
         {
             //Surface Thickness to reset to, based on lookup of surface material type applied if treatment is pavement renewal (Rehab)
             segment.SurfaceThickness = _frameworkModel.GetLookupValueNumber("surf_thickness_new", segment.SurfaceMaterial);
             segment.SurfaceNumberOfLayers = 1;  // Reset number of surface layer count
         }
-        else
+        else if (renewsSurface)
         {
             //Surface Thickness to add, based on lookup of surface material type applied if treatment is surface renewal
             segment.SurfaceThickness = segment.SurfaceThickness + _frameworkModel.GetLookupValueNumber("surf_thickness_add", segment.SurfaceMaterial);
@@ -101,10 +157,16 @@ public class Resetter
             segment.SurfaceNumberOfLayers = segment.SurfaceIsChipSealFlag == 1 ? segment.SurfaceNumberOfLayers + 1 : segment.SurfaceNumberOfLayers;
         }
 
-        segment.SurfaceFunction = this.GetSurfaceFunction(treatment.TreatmentName, isPreseal, segment.SurfaceFunction);
+        segment.SurfaceFunction = this.GetSurfaceFunction(treatment.TreatmentName, renewsSurface, segment.SurfaceFunction);
 
         segment.SurfaceExpectedLife = this.GetExpectedSurfaceLife(segment);
-        segment.SurfaceAge = isPreseal ? segment.SurfaceAge + 1 : 0;  //All treatments reset surface age to zero except if Preseal
+
+        // THE CLOCK IS WHAT SEPARATES A PRE-REPAIR FROM A RESURFACING, and it is the one thing a
+        // pre-repair on its own must never move. It advances by a year exactly as an untreated segment
+        // would, because a year did pass. The overlay arrangement renews the surface as well, so it
+        // resets the clock like any other resurfacing - and the guard in the deterioration models is
+        // what stops that plus the repair credit compounding to better than a rebuild.
+        segment.SurfaceAge = renewsSurface ? 0 : segment.SurfaceAge + 1;
         // Note: surface life achieved and surface remaining life are automatically calculated based on the surface age and expected life
 
         // The chipseal rut growth accumulator is a DIFFERENT clock from the surface age and must not be
@@ -120,7 +182,7 @@ public class Resetter
         }
         else
         {
-            this.ApplySurfaceTreatment(segment, isPreseal, random);
+            this.ApplySurfaceTreatment(segment, renewsSurface, isPreRepair, random);
         }
 
         // Increase the treatment count for the segment. This will also mark the treatment as treated, and reset the
@@ -187,6 +249,11 @@ public class Resetter
         segment.CrackSeverityQuantile = random.NextDouble();
         segment.CrackingBelowOnset = models.DrawCrackingBelowOnset(segment, random);
 
+        // Any credit from an earlier pre-repair goes with the deviates it was measured against. Left in
+        // place it would subtract from the fresh draws above and hand a rebuilt pavement a discount it
+        // did not earn - on top of the as-new offsets it is already entitled to.
+        DeteriorationModels.ClearPreRepairCredits(segment);
+
         // The as-new condition. Imposed, not modelled - see the class summary for why the models cannot
         // supply it themselves.
         segment.PctCracking = constants.RehabResetCrackingPercent;
@@ -220,31 +287,38 @@ public class Resetter
     /// values are sub-threshold by construction. A run that asserts condition never worsens across a
     /// treatment should apply that assertion at or above the onset threshold only.</para>
     ///
-    /// <para>A PRESEAL REPAIR CHANGES NO CONDITION AT ALL, and that is worth knowing rather than
-    /// discovering. It renews no surface, so no clock moves and every model returns what a year of
-    /// ageing returns. The jFunction-era model gave heavy maintenance a partial improvement through the
-    /// reset lookups that were deleted; the new specification covers resurfacing and rehabilitation and
-    /// says nothing about repairs, so there is nothing here to put in their place. It matters for the
-    /// treatments trigger, where a treatment with no modelled benefit will never earn its cost.</para>
+    /// <para>A PRE-REPAIR'S EFFECT IS ALREADY DECIDED BY THE TIME THIS RUNS. Its credit was computed
+    /// by the caller before the clocks moved, and the models read it wherever they read the deviate, so
+    /// there is nothing to apply here either. What this method does add is the guard: a pre-repair that
+    /// arrives WITH an overlay resets the clock as well as crediting the deviate, and the two together
+    /// must not compound to a condition better than a full rebuild.</para>
     /// </summary>
-    private void ApplySurfaceTreatment(RoadSegment segment, bool isPreseal, Random random)
+    private void ApplySurfaceTreatment(RoadSegment segment, bool renewsSurface, bool isPreRepair, Random random)
     {
         DeteriorationModels models = _domainModel.DeteriorationModels;
 
-        if (!isPreseal)
+        if (renewsSurface)
         {
             segment.CrackingBelowOnset = models.DrawCrackingBelowOnset(segment, random);
         }
 
-        models.UpdateConditions(segment, segment.SurfaceAge);
+        models.UpdateConditions(segment, segment.SurfaceAge, applyPreRepairGuard: isPreRepair);
         models.UpdateRuleBasedDistresses(segment, segment.SurfaceAge);
     }
 
     #endregion
 
-    private string GetSurfaceFunction(string treatmentName, bool isPreseal, string currentSurfaceFunction)
+    /// <summary>
+    /// The surface function the segment carries after the treatment.
+    /// <para>'1a' means preseal repairs are down and the seal over them has not been laid yet. It is
+    /// load-bearing rather than descriptive: the candidate selector reads it to force the follow-up
+    /// ChipSeal_H, the trigger reads it to avoid stacking a second lot of repairs on top, and the
+    /// expected-life lookup falls back to the reseal life because repairs have no life of their own.
+    /// A pre-repair that comes WITH an overlay is a real resurfacing and must not take it.</para>
+    /// </summary>
+    private string GetSurfaceFunction(string treatmentName, bool renewsSurface, string currentSurfaceFunction)
     {
-        if (isPreseal) return "1a";
+        if (!renewsSurface) return "1a";
 
         if (treatmentName.ToLower().StartsWith("rehab_ac")) return "2";
 
@@ -268,8 +342,8 @@ public class Resetter
         if (segment.SurfaceClass == "concrete") return segment.SurfaceExpectedLife; // Concrete has a fixed expected life, no lookup needed
         if (segment.SurfaceClass == "other") return segment.SurfaceExpectedLife;
 
-        // Since preseal is a temporary treatment, it does not have an actual expected life
-        // So base the expected life on the Reseal 'R' surface function
+        // Preseal repairs have no expected life of their own - they are a holding action waiting for
+        // the seal that follows. So base the expected life on the Reseal 'R' surface function.
         string surfFuncToUse = segment.SurfaceFunction == "1a" ? "R" : segment.SurfaceFunction;
 
         string lookupKey = $"{surfFuncToUse}_{segment.SurfaceMaterial}_{segment.RoadClass}".ToLower();

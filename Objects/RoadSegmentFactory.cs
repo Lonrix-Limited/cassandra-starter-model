@@ -246,6 +246,14 @@ public static class RoadSegmentFactory
         segment.IriInitSource = Convert.ToInt32(numParamValues["par_iri_init_src"]);
         segment.HasBeenRehabilitated = numParamValues["par_rehab_flag"] == 1;
 
+        // The pre-repair credits, and the clock they decay on. Same warning as above and it bites
+        // harder here: miss one of these and the credit silently vanishes the period after the repair,
+        // so a pre-repair would improve the segment for exactly one year and then undo itself.
+        segment.PreRepairCreditCracking = numParamValues["par_prerep_dz_crack"];
+        segment.PreRepairCreditRut = numParamValues["par_prerep_dz_rut"];
+        segment.PreRepairCreditIri = numParamValues["par_prerep_dz_iri"];
+        segment.PreRepairYears = numParamValues["par_prerep_yrs"];
+
         // STAGE 4 (treatments trigger): par_csl_status and par_csl_flag carry the candidate selection
         // outcome from the previous period and are not read back yet. Neither are the PDI, SDI, objective
         // value and rank parameters the jFunction-era model carried - the bundle declares none of them, and

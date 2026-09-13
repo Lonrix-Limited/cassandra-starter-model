@@ -1,4 +1,4 @@
-﻿using JCass_ModelCore.Models;
+using JCass_ModelCore.Models;
 
 
 namespace StarterModel.Objects;
@@ -42,6 +42,15 @@ public class Initialiser
         // from the surface age would add the same growth a second time and start the median chipseal
         // segment 29% too high. Set before InitialiseRutting, which inverts against it.
         segment.RutGrowthYears = 0.0;
+
+        // No segment starts the run carrying a pre-repair credit. Any repair done before the base date
+        // is already in the surveyed condition the year-zero inversion is about to reproduce, so
+        // crediting it again here would count it twice. Set explicitly rather than left to the default,
+        // because the inversions below mirror the credit and it has to be zero when they do.
+        segment.PreRepairCreditCracking = 0.0;
+        segment.PreRepairCreditRut = 0.0;
+        segment.PreRepairCreditIri = 0.0;
+        segment.PreRepairYears = 0.0;
 
         // Has anything happened to this segment since the survey that makes the reading describe a road
         // surface it no longer has? Decided before anything is initialised, because it changes what each
