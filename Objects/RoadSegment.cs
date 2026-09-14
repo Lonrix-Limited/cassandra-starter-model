@@ -1,4 +1,4 @@
-﻿using JCass_Core.JFunctions;
+using JCass_Core.JFunctions;
 using JCass_ModelCore.Models;
 
 namespace StarterModel.Objects;
@@ -115,7 +115,17 @@ public class RoadSegment
     private string _surfaceClass = string.Empty;
 
     /// <summary>
-    /// Surface class ('cs', 'ac', 'blocks', 'concrete', 'other').
+    /// Surface class: 'cs', 'ac', 'ogpa', 'slurry', 'blocks', 'concrete' or 'other'.
+    ///
+    /// <para>OGPA AND SLURRY ARE SURFACE CLASSES BUT NOT DETERIORATION GROUPS, and the two must not be
+    /// conflated. The class is what lets the treatments trigger name an OGPA treatment rather than an
+    /// asphalt one, and what the Resetter writes back from 'treat_surf_class' so the segment is still
+    /// recognisably OGPA next period. It is NOT what the condition models are keyed by - see
+    /// <see cref="DeteriorationGroup"/>, which resolves both of these to 'ac' on purpose.</para>
+    ///
+    /// <para>Set from the input column, and overwritten after every treatment from the
+    /// 'treat_surf_class' lookup, so a treatment can change it: a chipseal resurfacing on an OGPA
+    /// segment leaves it reading 'cs'.</para>
     /// </summary>
     public string SurfaceClass
     {
@@ -640,6 +650,15 @@ public class RoadSegment
     /// surface class through the 'surf_class_group' lookup set, which is also where blocks, concrete
     /// and other surfaces get placed. Set by the factory; not a parameter, because it follows from the
     /// surface class.
+    ///
+    /// <para>THERE ARE TWO GROUPS AND ONLY TWO, AND 'ogpa' AND 'slurry' BOTH BELONG TO 'ac'. That
+    /// mapping is deliberate and is still required: the increment models for rutting, roughness and
+    /// cracking are fitted per GROUP, and there is no OGPA or slurry fit to move them to. Giving
+    /// either one a group of its own in 'surf_class_group' would send it to a model that does not
+    /// exist, and the deterioration models throw naming the group rather than guessing.</para>
+    ///
+    /// <para>This is the thing to remember when reading <see cref="SurfaceClass"/>: OGPA gained its own
+    /// surface class when the treatment names were split out, and gained nothing at all here.</para>
     /// </summary>
     public string DeteriorationGroup { get; set; } = string.Empty;
 
