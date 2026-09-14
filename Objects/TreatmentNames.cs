@@ -1,4 +1,4 @@
-
+﻿
 namespace StarterModel.Objects;
 
 /// <summary>
@@ -24,7 +24,9 @@ namespace StarterModel.Objects;
 /// through the trigger follows the segment's NEXT surface, but the name follows its CURRENT surface
 /// class, because <c>inp_next_surf</c> has no value for OGPA and the current class is the only place
 /// the model knows OGPA exists. One consequence of that, worth knowing: an OGPA segment stays OGPA for
-/// the whole run, since the Resetter writes the class back from <c>treat_surf_class</c>.</para>
+/// as long as its next surface is not chipseal, since the Resetter writes the class back from
+/// <c>treat_surf_class</c>. A segment whose <c>inp_next_surf</c> reads 'cs' takes the chipseal route
+/// instead, and comes back from that lookup as plain chipseal.</para>
 /// </summary>
 public static class TreatmentNames
 {

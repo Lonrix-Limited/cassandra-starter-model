@@ -1,4 +1,4 @@
-
+﻿
 using JCass_Core.JFunctions;
 using JCass_ModelCore.Models;
 using JCass_ModelCore.Treatments;
@@ -134,10 +134,13 @@ public class TreatmentsTrigger
     // blocks, concrete or other as chipseal or asphalt. So an OGPA road's next surface reads 'ac', and
     // the segment's current surface class is the only place in the model where OGPA exists at all.
     //
-    // One consequence, and it is deliberate rather than overlooked: an OGPA segment stays OGPA for the
-    // whole run, because the Resetter writes the class straight back from 'treat_surf_class'. There is
-    // no way to say "this OGPA road is rehabilitated as plain asphalt". That needs an input column of
-    // its own and is a separate change.
+    // One consequence, and it is deliberate rather than overlooked: an OGPA segment stays OGPA for as
+    // long as its next surface is not chipseal, because the Resetter writes the class straight back
+    // from 'treat_surf_class'. There is no way to say "this OGPA road is rehabilitated as plain
+    // asphalt". That needs an input column of its own and is a separate change.
+    //
+    // 'inp_next_surf' = 'cs' IS the one exit, and it is not a designed one: such a segment takes the
+    // chipseal route, gets cs_resurf, and comes back from 'treat_surf_class' as plain chipseal.
 
     /// <summary>
     /// The resurfacing treatment for a segment on the asphalt route - the route taken when the next
@@ -380,16 +383,25 @@ public class TreatmentsTrigger
 
         // A HOLDING TREATMENT WITH NO COST CANNOT BE COSTED OR SPLIT. The budget fractions below divide
         // by this total, so a zero would reach AssignBudgetCategoryFractions as NaN and surface as an
-        // OverflowException naming nothing. It can only happen if BOTH rates this treatment is built
-        // from are still sitting at zero in lookups.xlsx, which is a treatment that has not been priced
-        // rather than one that is free - and a free treatment would win every optimisation it entered.
+        // OverflowException naming nothing.
+        //
+        // THREE DIFFERENT MISTAKES ARRIVE HERE AND THE MESSAGE HAS TO SAY WHICH, because they are fixed
+        // in different files. Both rates zero is a treatment nobody priced. ONE rate zero also lands
+        // here whenever the other half has no quantity - the repair quantity is driven by PDI, and PDI
+        // is zero for any segment with no cracking and rut inside the dead band, which is an ordinary
+        // segment rather than a rare one. And a zero area is neither: it is a bad row in the input CSV.
+        // So print the two rates and the two quantities and let the reader see which of the four
+        // numbers is the zero.
         if (totalCost <= 0)
         {
-            throw new Exception($"Treatment '{treatmentName}' has no cost: the unit rates for " +
-                                $"'{ResurfacingNameForAsphaltRoute(segment)}' and " +
-                                $"'{HeavyMaintenanceNameForAsphaltRoute(segment)}' in the " +
-                                $"'unit_rates_general' set of lookups.xlsx are both zero. Price them on " +
-                                $"the Treatment Rates tab of the Tuning page before running this model.");
+            throw new Exception($"Treatment '{treatmentName}' on segment '{segment.FeebackCode}' has no " +
+                                $"cost, so its budget split cannot be worked out. Overlay: " +
+                                $"{overlayQuantity} m2 at '{ResurfacingNameForAsphaltRoute(segment)}' = " +
+                                $"{overlayUnitRate}. Repairs: {repairQuantity} m2 at " +
+                                $"'{HeavyMaintenanceNameForAsphaltRoute(segment)}' = {repairUnitRate}. " +
+                                $"A zero RATE is priced on the Treatment Rates tab of the Tuning page, in " +
+                                $"the 'unit_rates_general' set of lookups.xlsx. A zero AREA is an input " +
+                                $"data problem on this segment and no rate will fix it.");
         }
 
         double dummyArea = totalCost; // Dummy area which is effectively the cost
