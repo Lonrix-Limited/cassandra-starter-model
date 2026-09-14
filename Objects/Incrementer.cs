@@ -57,7 +57,13 @@ public class Incrementer
         // resurfacing returns the surface age to zero and leaves this running, which is what makes
         // chipseal rutting inherited by the new seal rather than renewed by it. Only a rehabilitation
         // sends this back to zero. Asphalt never reads it.
-        segment.RutGrowthYears = segment.RutGrowthYears + 1;
+        //
+        // IT ACCUMULATES MILLIMETRES, AND THIS LINE SITS AFTER THE TRAFFIC GROWTH ABOVE ON PURPOSE. The
+        // increment is scaled by the segment's heavy vehicle count, so it is this period's traffic that
+        // prices this period's growth. The Resetter does the same thing in the same order; the two must
+        // agree, or a treated segment and an untreated one would accumulate on different traffic.
+        segment.RutGrowthMillimetres = segment.RutGrowthMillimetres
+                                       + _domainModel.DeteriorationModels.RutGrowthIncrement(segment);
 
         // Years since the segment's last pre-repair, which is what the three pre-repair credits decay
         // on. It advances here like any other clock; it is set back to zero only by a pre-repair, and

@@ -37,11 +37,12 @@ public class Initialiser
         segment.PavementAge = GetPavementAge(segment);
         segment.SurfaceAge = GetSurfacingAge(segment);
 
-        // The chipseal rut growth accumulator starts at ZERO, not at the surface age. The chipseal
-        // level model has no age term, so exp(mu) already reproduces the rut as surveyed; seeding this
-        // from the surface age would add the same growth a second time and start the median chipseal
-        // segment 29% too high. Set before InitialiseRutting, which inverts against it.
-        segment.RutGrowthYears = 0.0;
+        // The chipseal rut growth accumulator starts at ZERO millimetres, not at the growth implied by
+        // the surface age. The chipseal level model has no age term, so exp(mu) already reproduces the
+        // rut as surveyed; seeding this from the surface age would add the same growth a second time and
+        // start the median chipseal segment 29% too high. Set before InitialiseRutting, which inverts
+        // against it.
+        segment.RutGrowthMillimetres = 0.0;
 
         // No segment starts the run carrying a pre-repair credit. Any repair done before the base date
         // is already in the surveyed condition the year-zero inversion is about to reproduce, so

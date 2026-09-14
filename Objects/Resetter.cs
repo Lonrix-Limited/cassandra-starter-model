@@ -242,7 +242,14 @@ public class Resetter
         // it is laid on and inherits the rut rather than renewing it - which is why chipseal rut reads
         // 4.19 mm under surfaces up to six years old against 3.77 mm under surfaces over twenty, where
         // asphalt goes the other way. Only a rehabilitation returns it to zero.
-        segment.RutGrowthYears = isRehab ? 0.0 : segment.RutGrowthYears + 1;
+        //
+        // IT ACCUMULATES MILLIMETRES PRICED AT THIS PERIOD'S HEAVY TRAFFIC, and this line sits after the
+        // traffic growth at the top of this method for the same reason the Incrementer's does. A
+        // rehabilitation sends it to zero before ApplyRehabilitation imposes the as-new rut, so the
+        // rebuilt segment starts the next period with nothing accumulated behind it.
+        segment.RutGrowthMillimetres = isRehab
+            ? 0.0
+            : segment.RutGrowthMillimetres + _domainModel.DeteriorationModels.RutGrowthIncrement(segment);
 
         if (isRehab)
         {

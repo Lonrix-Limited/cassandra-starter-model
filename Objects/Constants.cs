@@ -44,6 +44,10 @@ public class Constants
     private double _detAgeCapYears;
     private double _detCrackOnsetPercent;
     private double _detRutChipSealGrowthPerYear;
+    private double _detRutGrowthHcvLow;
+    private double _detRutGrowthHcvHigh;
+    private double _detRutGrowthMultLow;
+    private double _detRutGrowthMultHigh;
     private double _detMultiplierClampSd;
 
     private double _detFeedbackCrackOnRut;
@@ -295,6 +299,26 @@ public class Constants
     /// because surface age is not the rut clock for chipseal. Report it as judgement wherever it appears.
     /// </summary>
     public double DetRutChipSealGrowthPerYear { get { return _detRutChipSealGrowthPerYear; } }
+
+    /// <summary>
+    /// Heavy vehicles per day at or below which the chipseal rut growth rate is multiplied by
+    /// <see cref="DetRutGrowthMultLow"/>. JUDGEMENT, and intended to be set from the tenth percentile
+    /// of heavy vehicles per day across the input set.
+    /// </summary>
+    public double DetRutGrowthHcvLow { get { return _detRutGrowthHcvLow; } }
+
+    /// <summary>
+    /// Heavy vehicles per day at or above which the chipseal rut growth rate is multiplied by
+    /// <see cref="DetRutGrowthMultHigh"/>. JUDGEMENT, and intended to be set from the ninetieth
+    /// percentile of heavy vehicles per day across the input set.
+    /// </summary>
+    public double DetRutGrowthHcvHigh { get { return _detRutGrowthHcvHigh; } }
+
+    /// <summary>Multiplier on the chipseal rut growth rate for the quietest segments. Judgement.</summary>
+    public double DetRutGrowthMultLow { get { return _detRutGrowthMultLow; } }
+
+    /// <summary>Multiplier on the chipseal rut growth rate for the busiest segments. Judgement.</summary>
+    public double DetRutGrowthMultHigh { get { return _detRutGrowthMultHigh; } }
 
     /// <summary>
     /// Each segment's persistent deviate is clamped to plus or minus this many standard deviations,
@@ -708,6 +732,7 @@ public class Constants
 
     private const string DeteriorationSet = "deterioration";
     private const string FeedbackSet = "deterioration_feedback";
+    private const string RutGrowthHcvSet = "rut_growth_hcv";
     private const string RuleDistressSet = "rule_distress";
     private const string SurfaceClassGroupSet = "surf_class_group";
     private const string RehabResetSet = "rehab_resets";
@@ -757,6 +782,45 @@ public class Constants
         return lookupSets[setName];
     }
 
+    /// <summary>
+    /// Checks the four heavy-traffic rut growth numbers against each other, at setup, before a single
+    /// period is modelled.
+    ///
+    /// <para>THE ORDER CHECK IS NOT COSMETIC. The multiplier interpolates on
+    /// (hcv - hcv_low) / (hcv_high - hcv_low): equal breakpoints divide by zero, and reversed ones
+    /// invert the adjustment silently - the quietest roads would rut fastest and the forecast would
+    /// still look entirely plausible. A negative or zero multiplier would let the growth term reduce
+    /// rut, which nothing else in this model does.</para>
+    /// </summary>
+    private void ValidateRutGrowthHcv()
+    {
+        if (_detRutGrowthHcvHigh <= _detRutGrowthHcvLow)
+        {
+            throw new Exception($"In lookup set '{RutGrowthHcvSet}' in lookups.xlsx, 'hcv_high' " +
+                                $"({_detRutGrowthHcvHigh}) must be greater than 'hcv_low' " +
+                                $"({_detRutGrowthHcvLow}). They are the two heavy-vehicle breakpoints the " +
+                                $"chipseal rut growth multiplier interpolates between, so equal values " +
+                                $"divide by zero and reversed values invert the adjustment without error.");
+        }
+
+        if (_detRutGrowthMultLow <= 0.0 || _detRutGrowthMultHigh <= 0.0)
+        {
+            throw new Exception($"In lookup set '{RutGrowthHcvSet}' in lookups.xlsx, 'mult_low' " +
+                                $"({_detRutGrowthMultLow}) and 'mult_high' ({_detRutGrowthMultHigh}) must " +
+                                $"both be greater than zero. They scale the chipseal rut growth rate, and " +
+                                $"a value of zero or below would let a chipseal segment's rut fall with age.");
+        }
+
+        if (_detRutGrowthMultHigh < _detRutGrowthMultLow)
+        {
+            throw new Exception($"In lookup set '{RutGrowthHcvSet}' in lookups.xlsx, 'mult_high' " +
+                                $"({_detRutGrowthMultHigh}) is below 'mult_low' ({_detRutGrowthMultLow}), " +
+                                $"which would make the quietest chipseal roads rut fastest. If that is " +
+                                $"genuinely intended, swap the two breakpoints instead so the intent is " +
+                                $"visible in the spreadsheet.");
+        }
+    }
+
     #endregion
 
     public Constants(Dictionary<string, Dictionary<string, object>> lookupSets)
@@ -800,6 +864,15 @@ public class Constants
         _detAgeCapYears = GetNumber(lookupSets, DeteriorationSet, "age_cap_years");
         _detCrackOnsetPercent = GetNumber(lookupSets, DeteriorationSet, "crack_onset_pct");
         _detRutChipSealGrowthPerYear = GetNumber(lookupSets, DeteriorationSet, "rut_cs_growth_mm_per_year");
+
+        // The heavy-traffic adjustment on that growth rate. Four numbers rather than one, so that the
+        // band can be widened, narrowed or switched off entirely without touching C#: setting both
+        // multipliers to 1.0 makes the adjustment inert and reproduces the flat rate exactly.
+        _detRutGrowthHcvLow = GetNumber(lookupSets, RutGrowthHcvSet, "hcv_low");
+        _detRutGrowthHcvHigh = GetNumber(lookupSets, RutGrowthHcvSet, "hcv_high");
+        _detRutGrowthMultLow = GetNumber(lookupSets, RutGrowthHcvSet, "mult_low");
+        _detRutGrowthMultHigh = GetNumber(lookupSets, RutGrowthHcvSet, "mult_high");
+        ValidateRutGrowthHcv();
         _detMultiplierClampSd = GetNumber(lookupSets, DeteriorationSet, "multiplier_clamp_sd");
 
         _detFeedbackCrackOnRut = GetNumber(lookupSets, FeedbackSet, "crack_on_rut");

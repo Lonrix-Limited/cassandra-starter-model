@@ -678,8 +678,15 @@ public class RoadSegment
     public double IriDeviate { get; set; }
 
     /// <summary>
-    /// Years of chipseal rut growth accumulated so far - the clock behind the only part of the model
-    /// that is NOT a function of surface age.
+    /// Millimetres of chipseal rut growth accumulated so far - the one part of the model that is NOT a
+    /// function of surface age.
+    ///
+    /// <para>IT HOLDS MILLIMETRES, NOT YEARS, AND THE DIFFERENCE IS LOAD-BEARING. The growth rate behind
+    /// it is scaled by the segment's modelled heavy vehicle count, which grows every period. Storing a
+    /// year count and pricing it at today's rate would revalue everything the segment has ever
+    /// accumulated whenever its traffic moved - a segment crossing from the low multiplier to the high
+    /// one would have twenty years of rut growth marked up in a single period. Adding each period's
+    /// millimetres as they are earned confines a traffic change to the year it happens in.</para>
     ///
     /// <para>It starts at ZERO at year zero, not at the segment's surface age, and that distinction is
     /// the whole point. The chipseal rut level model carries no age term, so exp(mu) already reproduces
@@ -695,7 +702,7 @@ public class RoadSegment
     ///
     /// <para>Asphalt ignores this entirely; its rutting runs on surface age like everything else.</para>
     /// </summary>
-    public double RutGrowthYears { get; set; }
+    public double RutGrowthMillimetres { get; set; }
 
     /// <summary>
     /// The segment's position in the cracking onset order, between 0 and 1. The segment has cracked in
@@ -1062,7 +1069,7 @@ public class RoadSegment
         //    surfacing; see the 'Deterioration model state' region for why these must persist --
         numModParamValues("par_rut_z", this.RutDeviate);
         numModParamValues("par_iri_z", this.IriDeviate);
-        numModParamValues("par_rut_growth_yrs", this.RutGrowthYears);
+        numModParamValues("par_rut_growth_mm", this.RutGrowthMillimetres);
         numModParamValues("par_crack_u_onset", this.CrackOnsetPosition);
         numModParamValues("par_crack_w_sev", this.CrackSeverityQuantile);
         numModParamValues("par_crack_below", this.CrackingBelowOnset);

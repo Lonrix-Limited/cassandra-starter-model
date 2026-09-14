@@ -266,11 +266,16 @@ public class DeteriorationModels
     /// placeholder on almost every chipseal segment. So the growth is an explicit annual amount, and
     /// it is JUDGEMENT rather than evidence - the single number here most likely to need revisiting.</para>
     ///
-    /// <para>THE GROWTH TERM DOES NOT RUN ON SURFACE AGE. It runs on RutGrowthYears, which starts at
-    /// zero at year zero and is left alone by a resurfacing. Driving it from the surface age instead
+    /// <para>THE GROWTH TERM DOES NOT RUN ON SURFACE AGE. It runs on RutGrowthMillimetres, which starts
+    /// at zero at year zero and is left alone by a resurfacing. Driving it from the surface age instead
     /// gets both ends wrong: at year zero it double-counts, because the chipseal level model has no age
     /// term and already reproduces the surveyed rut, and at a reseal it collapses to nothing, which
     /// would show a new seal removing rut that a chipseal in this network's data plainly inherits.</para>
+    ///
+    /// <para>THE RATE BEHIND THAT ACCUMULATOR IS NO LONGER FLAT. It is scaled by the segment's modelled
+    /// heavy vehicle count, between two multipliers the engineer sets in lookups.xlsx. The scaling is
+    /// applied as each period's millimetres are earned, never to the accumulated total - see
+    /// ChipSealRutGrowth for why that distinction is the whole of the stability argument.</para>
     ///
     /// <para>Asphalt has no growth term at all - its rutting is a level model on surface age, and it
     /// does reset on a resurfacing, which is the opposite of chipseal and is measured rather than
@@ -293,13 +298,69 @@ public class DeteriorationModels
     }
 
     /// <summary>
-    /// The accumulated chipseal rut growth, in mm. Zero for asphalt, and zero for any chipseal segment
-    /// in its first modelled period.
-    /// <para>One place so the forward model and the year-zero inversion cannot drift apart.</para>
+    /// The accumulated chipseal rut growth, in mm. Zero for any segment in its first modelled period,
+    /// and zero again after a rehabilitation.
+    ///
+    /// <para>THIS IS A PURE READ OF STORED STATE, AND THAT IS THE WHOLE POINT. The accumulator holds
+    /// millimetres already accumulated, not a count of years to be priced at today's rate. Every use of
+    /// the growth term goes through here - the forward model, the year-zero inversion and the pre-repair
+    /// guard - so the three cannot disagree about what a segment has accumulated.</para>
+    ///
+    /// <para>IT USED TO BE rate x years, AND THAT SHAPE COULD NOT SURVIVE A VARIABLE RATE. With the rate
+    /// now depending on the segment's modelled heavy vehicle count, which grows every period, multiplying
+    /// a year count by today's rate re-prices the segment's entire history each time its traffic moves: a
+    /// segment that drifts from the low multiplier to the high one would have twenty years of accumulated
+    /// rut revalued upwards in a single period, with nothing reporting it. Accumulating millimetres as
+    /// they are earned confines a traffic change to the year it happens in.</para>
     /// </summary>
     private double ChipSealRutGrowth(RoadSegment segment)
     {
-        return _constants.DetRutChipSealGrowthPerYear * Math.Max(0.0, segment.RutGrowthYears);
+        return Math.Max(0.0, segment.RutGrowthMillimetres);
+    }
+
+    /// <summary>
+    /// The chipseal rut growth earned in one period, in mm: the lookup rate scaled by the segment's
+    /// heavy traffic multiplier. Called by the Incrementer and the Resetter, which are the only two
+    /// places the accumulator advances.
+    ///
+    /// <para>ACCUMULATED FOR EVERY SEGMENT, NOT ONLY FOR CHIPSEAL, which is how the year counter it
+    /// replaced behaved and is deliberate rather than incidental. A segment resealed from asphalt to
+    /// chipseal starts reading the accumulator on the day its surface class changes, and it inherits
+    /// the rut the pavement underneath has been accumulating all along - the same reasoning that makes
+    /// a reseal leave the accumulator running rather than resetting it.</para>
+    /// </summary>
+    public double RutGrowthIncrement(RoadSegment segment)
+    {
+        return _constants.DetRutChipSealGrowthPerYear * this.HeavyTrafficGrowthMultiplier(segment.HeavyVehiclesPerDay);
+    }
+
+    /// <summary>
+    /// The multiplier on the chipseal rut growth rate for a given heavy vehicle count per day: flat at
+    /// the low multiplier below the low breakpoint, flat at the high multiplier above the high one, and
+    /// linear between them.
+    ///
+    /// <para>BOUNDED BY CONSTRUCTION, AND THAT IS WHY THE CLAMP IS ON THE FRACTION RATHER THAN ON THE
+    /// RESULT. The interpolating fraction is clamped to [0, 1] before it is used, so the multiplier
+    /// cannot leave the band the engineer set whatever the traffic does - including a segment whose
+    /// modelled traffic grows for thirty years. Clamping the product instead would put the bound in a
+    /// second place that a later edit could forget.</para>
+    ///
+    /// <para>The breakpoints are read against the MODELLED heavy vehicle count, which grows with the
+    /// modelled ADT each period. That is the opposite of what the fitted deterioration models do - they
+    /// read the surveyed traffic and never the grown value - and it is deliberate here: this term is
+    /// not part of any fit, so there is no fitted relationship for a growing covariate to contradict.</para>
+    /// </summary>
+    public double HeavyTrafficGrowthMultiplier(double heavyVehiclesPerDay)
+    {
+        double low = _constants.DetRutGrowthHcvLow;
+        double high = _constants.DetRutGrowthHcvHigh;
+
+        // Constants validates high > low at setup, so this division is safe here.
+        double fraction = (heavyVehiclesPerDay - low) / (high - low);
+        fraction = Math.Clamp(fraction, 0.0, 1.0);
+
+        return _constants.DetRutGrowthMultLow
+               + fraction * (_constants.DetRutGrowthMultHigh - _constants.DetRutGrowthMultLow);
     }
 
     /// <summary>
