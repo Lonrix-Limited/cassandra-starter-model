@@ -684,9 +684,16 @@ public class RoadSegment
     /// <para>IT HOLDS MILLIMETRES, NOT YEARS, AND THE DIFFERENCE IS LOAD-BEARING. The growth rate behind
     /// it is scaled by the segment's modelled heavy vehicle count, which grows every period. Storing a
     /// year count and pricing it at today's rate would revalue everything the segment has ever
-    /// accumulated whenever its traffic moved - a segment crossing from the low multiplier to the high
-    /// one would have twenty years of rut growth marked up in a single period. Adding each period's
-    /// millimetres as they are earned confines a traffic change to the year it happens in.</para>
+    /// accumulated whenever its traffic moved. Adding each period's millimetres as they are earned
+    /// confines a traffic change to the year it happens in, so the forecast no longer depends on how wide
+    /// the engineer set the traffic band - which is the point, rather than the size of any one step.</para>
+    ///
+    /// <para>That step is smaller than it first looks and is worth stating honestly, because the note in
+    /// the model knowledge file originally put it fifteen times too high. On the delivered breakpoints of
+    /// 60 and 600 heavy vehicles the worst single-period re-pricing under the old shape was about 0.6%;
+    /// its ceiling is the full band width, 22%, but that needs a tenfold traffic jump in one year. The
+    /// figure grows as the band narrows - about 9% at breakpoints of 100 and 110 - which is why removing
+    /// the dependence entirely is better than checking it each time the band is retuned.</para>
     ///
     /// <para>It starts at ZERO at year zero, not at the segment's surface age, and that distinction is
     /// the whole point. The chipseal rut level model carries no age term, so exp(mu) already reproduces

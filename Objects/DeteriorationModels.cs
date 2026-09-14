@@ -306,12 +306,21 @@ public class DeteriorationModels
     /// the growth term goes through here - the forward model, the year-zero inversion and the pre-repair
     /// guard - so the three cannot disagree about what a segment has accumulated.</para>
     ///
-    /// <para>IT USED TO BE rate x years, AND THAT SHAPE COULD NOT SURVIVE A VARIABLE RATE. With the rate
-    /// now depending on the segment's modelled heavy vehicle count, which grows every period, multiplying
-    /// a year count by today's rate re-prices the segment's entire history each time its traffic moves: a
-    /// segment that drifts from the low multiplier to the high one would have twenty years of accumulated
-    /// rut revalued upwards in a single period, with nothing reporting it. Accumulating millimetres as
-    /// they are earned confines a traffic change to the year it happens in.</para>
+    /// <para>IT USED TO BE rate x years, AND THAT SHAPE MAKES THE FORECAST DEPEND ON THE BAND WIDTH. With
+    /// the rate depending on the segment's modelled heavy vehicle count, which grows every period,
+    /// multiplying a year count by today's rate re-prices the segment's entire accumulated history each
+    /// time its traffic moves, with nothing reporting it. Accumulating millimetres as they are earned
+    /// confines a traffic change to the year it happens in, and that is what makes the band width stop
+    /// mattering - which is the real argument for the change, not the size of any one step.</para>
+    ///
+    /// <para>ON THE SIZE OF THAT STEP, BECAUSE THE NUMBER IS EASY TO OVERSTATE. Its ceiling is the full
+    /// band width - 22% at the delivered multipliers of 0.9 and 1.1 - but reaching it needs a segment to
+    /// cross the whole band in one period, so with breakpoints of 60 and 600 heavy vehicles that is a
+    /// tenfold traffic jump in a year. Under compounding growth the worst single-period re-pricing on the
+    /// delivered band is about 0.6%. It scales with how NARROW the band is: at breakpoints of 100 and 110
+    /// it reaches roughly 9%. So the old shape was tolerable as configured and would quietly stop being
+    /// tolerable the moment somebody tightened the breakpoints - which is precisely the kind of coupling
+    /// this design removes.</para>
     /// </summary>
     private double ChipSealRutGrowth(RoadSegment segment)
     {
