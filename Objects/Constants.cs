@@ -300,10 +300,9 @@ public class Constants
     /// by <see cref="DetRutGrowthMultLow"/> to <see cref="DetRutGrowthMultHigh"/>, so no segment gets
     /// exactly this rate unless both multipliers are 1.0. Report it as judgement wherever it appears.
     ///
-    /// <para>IT IS NOT A RATE PER YEAR SINCE SURFACING, whatever the lookup comment beside it in
-    /// lookups.xlsx still says. The accumulator it feeds is a clock of its own: it survives a
-    /// resurfacing and returns to zero only on a rehabilitation, precisely because surface age is not
-    /// the rut clock for chipseal.</para>
+    /// <para>IT IS NOT A RATE PER YEAR SINCE SURFACING. The accumulator it feeds is a clock of its own:
+    /// it survives a resurfacing and returns to zero only on a rehabilitation, precisely because surface
+    /// age is not the rut clock for chipseal.</para>
     /// </summary>
     public double DetRutChipSealGrowthPerYear { get { return _detRutChipSealGrowthPerYear; } }
 
