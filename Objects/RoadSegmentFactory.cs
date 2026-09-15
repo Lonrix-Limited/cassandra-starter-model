@@ -176,7 +176,8 @@ public static class RoadSegmentFactory
         segment.SurfacingDateString = textInputValues["inp_surf_date"];
         segment.PavementDateString = textInputValues["inp_pave_date"];
 
-        // Deflection - a static measure, not modelled forward
+        // Deflection - a static measure, not modelled forward. Overridden from par_d0 below for a rebuilt
+        // pavement; see there.
         segment.CentralDeflection = numInputValues["inp_lmd_d0_75th"];
 
         // High speed data survey date and the surveyed values, kept for reference. The modelled rut and IRI
@@ -245,6 +246,19 @@ public static class RoadSegmentFactory
         segment.RutInitSource = Convert.ToInt32(numParamValues["par_rut_init_src"]);
         segment.IriInitSource = Convert.ToInt32(numParamValues["par_iri_init_src"]);
         segment.HasBeenRehabilitated = numParamValues["par_rehab_flag"] == 1;
+
+        // Deflection is static - read from inp_lmd_d0_75th above - EXCEPT on a rebuilt pavement, where the
+        // Resetter (or the Initialiser, for a rebuild before the survey) replaced it with the group median.
+        // Without this read-back that replacement lasted exactly one period: the next period re-read the old
+        // pavement's deflection from the input, and cracking onset and severity, chipseal rutting and both
+        // roughness models went back to the dug-up road with nothing reporting it.
+        // Read back ONLY when rehabilitated, never for every segment: par_d0 is clamped to its declared range
+        // on every write, so an out-of-range or sentinel input would be modelled raw at year zero and clamped
+        // from period one - a jump in the forecast of its own.
+        if (segment.HasBeenRehabilitated)
+        {
+            segment.CentralDeflection = numParamValues["par_d0"];
+        }
 
         // The pre-repair credits, and the clock they decay on. Same warning as above and it bites
         // harder here: miss one of these and the credit silently vanishes the period after the repair,
