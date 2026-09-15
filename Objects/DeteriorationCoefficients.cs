@@ -51,11 +51,13 @@ public class DeteriorationCoefficients
 
         foreach (string group in DeteriorationModels.ModelGroups)
         {
-            this.CrackOnset[group] = Load(workFolder, $"logistic_crack_onset_{group}.csv");
-            this.CrackSeverity[group] = Load(workFolder, $"lognormal_crack_severity_{group}.csv");
-            this.CrackBelow[group] = Load(workFolder, $"lognormal_crack_below_{group}.csv");
-            this.Rut[group] = Load(workFolder, $"lognormal_rut_{group}.csv");
-            this.Iri[group] = Load(workFolder, $"lognormal_iri_{group}.csv");
+            // The onset model is logistic and has no sigma: its randomness is the segment's uniform
+            // onset draw. Every lognormal file must carry one.
+            this.CrackOnset[group] = Load(workFolder, $"logistic_crack_onset_{group}.csv", requiresSigma: false);
+            this.CrackSeverity[group] = Load(workFolder, $"lognormal_crack_severity_{group}.csv", requiresSigma: true);
+            this.CrackBelow[group] = Load(workFolder, $"lognormal_crack_below_{group}.csv", requiresSigma: true);
+            this.Rut[group] = Load(workFolder, $"lognormal_rut_{group}.csv", requiresSigma: true);
+            this.Iri[group] = Load(workFolder, $"lognormal_iri_{group}.csv", requiresSigma: true);
         }
     }
 
@@ -63,7 +65,7 @@ public class DeteriorationCoefficients
     /// Reads one coefficient file into a FittedModel. Guards the read and names the full path, because
     /// an unguarded missing setup file surfaces much later as a wrong number rather than as a missing file.
     /// </summary>
-    private static FittedModel Load(string workFolder, string fileName)
+    private static FittedModel Load(string workFolder, string fileName, bool requiresSigma)
     {
         string path = Path.Combine(workFolder, SupportingFolder, fileName);
         if (!File.Exists(path))
@@ -77,7 +79,7 @@ public class DeteriorationCoefficients
         coefficients.CheckRequiredColumns(new List<string> { TermColumn, EstimateColumn }, throwErrorIfNotFound: true);
 
         Dictionary<string, string> rawTerms = coefficients.GetKeysAndValuesFromColumn(TermColumn, EstimateColumn);
-        return new FittedModel(rawTerms, fileName);
+        return new FittedModel(rawTerms, fileName, requiresSigma);
     }
 }
 
@@ -95,9 +97,16 @@ public class FittedModel
 {
     private readonly Dictionary<string, double> _coefficients;
     private readonly string _sourceFile;
+    private readonly double? _sigma;
 
-    /// <summary>Residual standard deviation of the fit, scaling the segment's persistent multiplier.</summary>
-    public double Sigma { get; }
+    /// <summary>
+    /// Residual standard deviation of the fit, scaling the segment's persistent multiplier. A logistic
+    /// fit has none, and reading it there throws rather than returning zero - a zero spread would make
+    /// every segment identical with nothing reporting it.
+    /// </summary>
+    public double Sigma => _sigma ?? throw new InvalidOperationException(
+        $"Coefficient file '{_sourceFile}' is a fit with no sigma, and the model asked for one. " +
+        $"Its randomness comes from elsewhere - check which sub-model the calling code meant to read.");
 
     /// <summary>
     /// Share of segments in the sub-threshold group whose cracking is exactly zero. Only the Part C
@@ -112,12 +121,13 @@ public class FittedModel
     /// </summary>
     /// <param name="rawTerms">Term name to estimate, as read from the file</param>
     /// <param name="sourceFile">File name, used in error messages</param>
-    public FittedModel(Dictionary<string, string> rawTerms, string sourceFile)
+    /// <param name="requiresSigma">True for a lognormal fit, which must carry a positive '(Sigma)' term</param>
+    public FittedModel(Dictionary<string, string> rawTerms, string sourceFile, bool requiresSigma)
     {
         _sourceFile = sourceFile;
         _coefficients = new Dictionary<string, double>();
 
-        double sigma = 0.0;
+        double? sigma = null;
         double zeroShare = 0.0;
 
         foreach (KeyValuePair<string, string> rawTerm in rawTerms)
@@ -130,14 +140,14 @@ public class FittedModel
             else { _coefficients[canonical] = estimate; }
         }
 
-        if (sigma <= 0.0)
+        if (requiresSigma && !(sigma > 0.0))
         {
             throw new Exception($"Coefficient file '{sourceFile}' has no positive '(Sigma)' term. Every " +
-                                $"sub-model needs one: it scales the segment's persistent multiplier, and " +
-                                $"a sigma of zero would make every segment identical with nothing reporting it.");
+                                $"lognormal sub-model needs one: it scales the segment's persistent multiplier, " +
+                                $"and a sigma of zero would make every segment identical with nothing reporting it.");
         }
 
-        this.Sigma = sigma;
+        _sigma = requiresSigma ? sigma : null;
         this.ZeroShare = zeroShare;
     }
 
