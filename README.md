@@ -30,11 +30,13 @@ lognormal_rut_ac.csv           lognormal_iri_ac.csv
 lognormal_rut_cs.csv           lognormal_iri_cs.csv
 ```
 
-Each is a two-column `term` / `estimate` table as an R fit writes it, and each carries a `(Sigma)`
-row — the residual standard deviation, which is what makes two segments of the same age and traffic
-deteriorate differently. **Sigma is as network-specific as any slope**, and one carried over from
-someone else's fit sets the spread of your entire forecast. The cracking-onset files are logistic
-fits and additionally carry `(ZeroShare)`.
+Each is a `term` / `estimate` table as an R fit writes it. The eight lognormal files each carry a
+`(Sigma)` row — the residual standard deviation, which is what makes two segments of the same age and
+traffic deteriorate differently. **Sigma is as network-specific as any slope**, and one carried over
+from someone else's fit sets the spread of your entire forecast; the model refuses a lognormal file
+without a positive one. The two cracking-onset files are logistic fits and have no sigma — onset
+randomness is each segment's own uniform draw — so do not add one. The two below-threshold cracking
+files additionally carry `(ZeroShare)`.
 
 **What to do about it.** Refitting these is a statistical exercise on your own condition survey
 history, not a modelling one, and it is not something to guess at. **Lonrix can carry out the refit
