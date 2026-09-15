@@ -177,8 +177,9 @@ public class RoadSegment
     /// <para>It follows the CURRENT surface class, so after a treatment that changes the class it answers
     /// for the new surface, not the one in the input file.</para>
     ///
-    /// <para>Used by the Initialiser to discard the LCMS crack reading on blocks, where the laser reads
-    /// the joints between blocks as cracks.</para>
+    /// <para>Used to keep cracking at zero on blocks for the whole run - the LCMS laser reads the joints
+    /// between blocks as cracks. The Initialiser discards the crack reading; DeteriorationModels.GetCracking
+    /// returns zero in every period.</para>
     /// </summary>
     public bool IsBlockPaving
     {

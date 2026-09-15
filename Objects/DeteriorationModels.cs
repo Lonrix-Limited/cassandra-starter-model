@@ -160,9 +160,20 @@ public class DeteriorationModels
     /// is wrong in a way that does not announce itself: it would assign sub-threshold cracking to
     /// segments this method has just decided have cracked - two thirds of chipseal onset segments at
     /// age one, and still one in fifteen at age thirty.</para>
+    ///
+    /// <para>BLOCK PAVING NEVER CRACKS IN THIS MODEL - the engineer's decision. The LCMS laser reads block
+    /// joints as cracks, and the fitted models were never fitted to blocks, so a forecast crack on blocks
+    /// would be a prediction of a reading already known to be false. Gated here because every cracking
+    /// value - year zero, an untreated year, a treatment year - comes through this method. The draws are
+    /// still held, so a block segment that is later surfaced as something else has a character to use.</para>
     /// </summary>
     public double GetCracking(RoadSegment segment, double surfaceAgeYears)
     {
+        if (segment.IsBlockPaving)
+        {
+            return 0.0;
+        }
+
         double onsetProbability = this.CrackOnsetProbability(segment, surfaceAgeYears);
         if (segment.CrackOnsetPosition >= onsetProbability)
         {
@@ -712,8 +723,13 @@ public class DeteriorationModels
         double surfaceAge = segment.SurfaceAge;
 
         // --- Cracking: on the severity deviate, never on onset ---
+        //
+        // Never on block paving. GetCracking holds blocks at zero, so a credit measured from that zero
+        // would be the whole distance to the clamp - and the trigger routes by NEXT surface, so a block
+        // segment can be offered a pre-repair that then gives it a chipseal or asphalt surface class,
+        // where that oversized credit would suppress real cracking on the new surface.
         double crackingCredit = 0.0;
-        if (segment.CrackOnsetPosition < this.CrackOnsetProbability(segment, surfaceAge))
+        if (!segment.IsBlockPaving && segment.CrackOnsetPosition < this.CrackOnsetProbability(segment, surfaceAge))
         {
             double sigma = this.ModelFor(_coefficients.CrackSeverity, segment, "cracking severity").Sigma;
             double mu = this.CrackSeverityMu(segment, surfaceAge);

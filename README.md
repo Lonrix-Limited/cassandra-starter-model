@@ -81,12 +81,12 @@ than its peers stay worse. The deviate is clamped to a configurable number of st
 one extreme survey reading cannot lock a segment into fast deterioration for the whole run; a clamped
 segment is recorded as clamped, because it does *not* reproduce its surveyed value.
 
-**Block paving never takes its cracking from the survey.** The LCMS laser reads the joints between
-blocks as cracks, so a segment whose surface class starts with `block` starts the run with no
-cracking whatever `inp_pct_cracks` says, and is recorded as inferred (`par_crack_init_src = 2`) — the
-same handling as a segment resurfaced since its survey. If your crack survey does not have this
-problem, remove the `segment.IsBlockPaving` check in `Initialiser.InitialiseCracking`. The property
-itself lives on `RoadSegment` and is there for any other rule that needs to recognise blocks.
+**Block paving never cracks.** The LCMS laser reads the joints between blocks as cracks, and the
+fitted models were never fitted to blocks. So a segment whose surface class starts with `block` has
+zero cracking for the whole run: its `inp_pct_cracks` reading is discarded at year zero (recorded as
+inferred, `par_crack_init_src = 2`), and `DeteriorationModels.GetCracking` returns zero for it in every
+period. If your crack survey does not have this problem and you want blocks modelled, remove the
+`segment.IsBlockPaving` checks in both places. The property itself lives on `RoadSegment`.
 
 **The inversion and the forward model must mirror each other term for term.** If you add anything to
 the forward model outside the lognormal core, the inversion has to undo it, or year zero stops

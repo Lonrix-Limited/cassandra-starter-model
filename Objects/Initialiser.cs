@@ -214,7 +214,9 @@ public class Initialiser
             // Block paving starts with no cracking for a different reason: the LCMS laser reads the joints
             // between blocks as cracks, so its crack reading on blocks is a false positive, not a
             // measurement. It is discarded whatever it says, including the -1 no-survey sentinel, and the
-            // segment is flagged inferred because nothing about its cracking came from the survey.
+            // segment is flagged inferred because nothing about its cracking came from the survey. The
+            // draws are still set here, but GetCracking holds blocks at zero for the whole run; they are
+            // only used if a treatment later gives the segment a different surface class.
             //
             // Both draws are replaced. The onset position comes from the band that means "has not cracked
             // at this age", which is what keeps the segment uncracked rather than leaving it one unlucky
