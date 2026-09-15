@@ -81,6 +81,12 @@ than its peers stay worse. The deviate is clamped to a configurable number of st
 one extreme survey reading cannot lock a segment into fast deterioration for the whole run; a clamped
 segment is recorded as clamped, because it does *not* reproduce its surveyed value.
 
+**Block paving never takes its cracking from the survey.** The LCMS laser reads the joints between
+blocks as cracks, so a segment whose surface class starts with `block` starts the run with no
+cracking whatever `inp_pct_cracks` says, and is recorded as inferred (`par_crack_init_src = 2`) — the
+same handling as a segment resurfaced since its survey. If your crack survey does not have this
+problem, remove the `IsBlockPaving` check in `Initialiser.InitialiseCracking`.
+
 **The inversion and the forward model must mirror each other term for term.** If you add anything to
 the forward model outside the lognormal core, the inversion has to undo it, or year zero stops
 matching the survey. This is the most common way to break the model subtly.

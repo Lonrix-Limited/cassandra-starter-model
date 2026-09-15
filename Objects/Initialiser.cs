@@ -178,8 +178,9 @@ public class Initialiser
     ///
     /// <para>FOUR cases, and the difference between them is what the reading entitles the segment to.
     /// The first is decided before the reading is even looked at: a segment resurfaced or rebuilt since
-    /// the survey has a reading that describes a surface it no longer has, so it is discarded and the
-    /// segment starts uncracked. The remaining three all read the survey.</para>
+    /// the survey has a reading that describes a surface it no longer has, and a block paved segment has
+    /// a reading that never described its surface at all. Either way it is discarded and the segment
+    /// starts uncracked. The remaining three all read the survey.</para>
     ///
     /// <para>A reading at or above the onset threshold says the segment HAS cracked, so its onset position
     /// must be one that produces onset at this age, and its severity quantile is an exact inversion. A
@@ -202,13 +203,18 @@ public class Initialiser
         // As read from inp_pct_cracks by the factory, so it may still carry the not-surveyed sentinel.
         double observedCracking = segment.PctCracking;
 
-        if (surveyStatus != SurveyStatus.Current)
+        if (surveyStatus != SurveyStatus.Current || IsBlockPaving(segment))
         {
             // The segment has been resurfaced or rebuilt since the survey, so it starts the run with NO
             // CRACKING AT ALL - the engineer's decision, and the reason for it is that the alternative is
             // worse in a specific way: a segment that was resealed precisely because it was cracked would
             // otherwise carry the old surface's crack severity onto the new one, sit above the treatment
             // triggers, and be put forward for treatment again within a year or two of having had one.
+            //
+            // Block paving starts with no cracking for a different reason: the LCMS laser reads the joints
+            // between blocks as cracks, so its crack reading on blocks is a false positive, not a
+            // measurement. It is discarded whatever it says, including the -1 no-survey sentinel, and the
+            // segment is flagged inferred because nothing about its cracking came from the survey.
             //
             // Both draws are replaced. The onset position comes from the band that means "has not cracked
             // at this age", which is what keeps the segment uncracked rather than leaving it one unlucky
@@ -254,6 +260,16 @@ public class Initialiser
         // Run the model forward at the year-zero age. For a surveyed segment this returns the surveyed
         // value, which is the check that the inversion above is the exact inverse of the forward model.
         segment.PctCracking = models.GetCracking(segment, segment.SurfaceAge);
+    }
+
+    /// <summary>
+    /// Whether the segment is block paved, by a surface class starting with 'block' - 'blocks' in this
+    /// model's data. Trimmed and case-insensitive, so a client file carrying 'Blocks' or 'block' is
+    /// still recognised rather than quietly keeping a false-positive crack reading.
+    /// </summary>
+    private static bool IsBlockPaving(RoadSegment segment)
+    {
+        return (segment.SurfaceClass ?? string.Empty).Trim().StartsWith("block", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
