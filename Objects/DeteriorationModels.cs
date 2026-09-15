@@ -541,17 +541,37 @@ public class DeteriorationModels
     /// <summary>
     /// Flushing percentage. Zero until the onset age, then a straight line. Both the rate and the
     /// traffic factor are engineering judgement held in lookups.xlsx, not fitted values.
+    ///
+    /// <para>CHIPSEAL ONLY - the engineer's decision. Every other surface class reads zero. The rule is
+    /// here rather than in the Incrementer so that initialisation, an untreated year and a treatment year
+    /// all agree: gated in one path only, a segment would start the run with a distress it loses a year
+    /// later with no treatment behind it. It reads the CURRENT surface class, which a treatment has
+    /// already overwritten by the time the Resetter calls this, so it follows the surface just laid.</para>
     /// </summary>
     public double GetFlushing(RoadSegment segment, double surfaceAgeYears)
     {
+        if (segment.SurfaceIsChipSealFlag != 1)
+        {
+            return 0.0;
+        }
         return this.RuleDistressExtent(segment, surfaceAgeYears, _constants.RuleFlushingRatePerYear);
     }
 
     /// <summary>
     /// Ravelling percentage. Same rule and the same caveat as flushing.
+    ///
+    /// <para>ASPHALT AND OGPA ONLY - 'ac' or 'ogpa', the engineer's decision, and every other surface
+    /// class reads zero. Decided on the SURFACE CLASS, not the deterioration group, and that is the point:
+    /// slurry is in the asphalt group for the fitted models but is deliberately excluded here. Do not
+    /// "simplify" this to a test on <see cref="RoadSegment.DeteriorationGroup"/>.</para>
     /// </summary>
     public double GetRavelling(RoadSegment segment, double surfaceAgeYears)
     {
+        string surfaceClass = segment.SurfaceClass.Trim();
+        if (surfaceClass != "ac" && surfaceClass != "ogpa")
+        {
+            return 0.0;
+        }
         return this.RuleDistressExtent(segment, surfaceAgeYears, _constants.RuleRavellingRatePerYear);
     }
 
