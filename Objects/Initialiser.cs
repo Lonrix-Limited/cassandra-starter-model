@@ -203,7 +203,7 @@ public class Initialiser
         // As read from inp_pct_cracks by the factory, so it may still carry the not-surveyed sentinel.
         double observedCracking = segment.PctCracking;
 
-        if (surveyStatus != SurveyStatus.Current || IsBlockPaving(segment))
+        if (surveyStatus != SurveyStatus.Current || segment.IsBlockPaving)
         {
             // The segment has been resurfaced or rebuilt since the survey, so it starts the run with NO
             // CRACKING AT ALL - the engineer's decision, and the reason for it is that the alternative is
@@ -260,16 +260,6 @@ public class Initialiser
         // Run the model forward at the year-zero age. For a surveyed segment this returns the surveyed
         // value, which is the check that the inversion above is the exact inverse of the forward model.
         segment.PctCracking = models.GetCracking(segment, segment.SurfaceAge);
-    }
-
-    /// <summary>
-    /// Whether the segment is block paved, by a surface class starting with 'block' - 'blocks' in this
-    /// model's data. Trimmed and case-insensitive, so a client file carrying 'Blocks' or 'block' is
-    /// still recognised rather than quietly keeping a false-positive crack reading.
-    /// </summary>
-    private static bool IsBlockPaving(RoadSegment segment)
-    {
-        return (segment.SurfaceClass ?? string.Empty).Trim().StartsWith("block", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

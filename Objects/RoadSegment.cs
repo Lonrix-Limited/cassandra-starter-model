@@ -170,6 +170,25 @@ public class RoadSegment
     }
 
     /// <summary>
+    /// Whether the surface is block paving, by a surface class starting with 'block' - 'blocks' in this
+    /// model's data. Calculated from <see cref="SurfaceClass"/>, which is already lower-cased; trimmed here
+    /// so a stray space in a client file does not hide a block segment.
+    ///
+    /// <para>It follows the CURRENT surface class, so after a treatment that changes the class it answers
+    /// for the new surface, not the one in the input file.</para>
+    ///
+    /// <para>Used by the Initialiser to discard the LCMS crack reading on blocks, where the laser reads
+    /// the joints between blocks as cracks.</para>
+    /// </summary>
+    public bool IsBlockPaving
+    {
+        get
+        {
+            return this.SurfaceClass.Trim().StartsWith("block", StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
     /// Replacement surfacing type. Could be 'ac', 'cs', 'blocks', 'concrete' etc.
     /// </summary>
     public string NextSurface { get; set; } = string.Empty;

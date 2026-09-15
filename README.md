@@ -85,7 +85,8 @@ segment is recorded as clamped, because it does *not* reproduce its surveyed val
 blocks as cracks, so a segment whose surface class starts with `block` starts the run with no
 cracking whatever `inp_pct_cracks` says, and is recorded as inferred (`par_crack_init_src = 2`) — the
 same handling as a segment resurfaced since its survey. If your crack survey does not have this
-problem, remove the `IsBlockPaving` check in `Initialiser.InitialiseCracking`.
+problem, remove the `segment.IsBlockPaving` check in `Initialiser.InitialiseCracking`. The property
+itself lives on `RoadSegment` and is there for any other rule that needs to recognise blocks.
 
 **The inversion and the forward model must mirror each other term for term.** If you add anything to
 the forward model outside the lognormal core, the inversion has to undo it, or year zero stops
