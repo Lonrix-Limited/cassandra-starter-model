@@ -254,11 +254,11 @@ public static class RoadSegmentFactory
         segment.PreRepairCreditIri = numParamValues["par_prerep_dz_iri"];
         segment.PreRepairYears = numParamValues["par_prerep_yrs"];
 
-        // STAGE 4 (treatments trigger): par_csl_status and par_csl_flag carry the candidate selection
-        // outcome from the previous period and are not read back yet. Neither are the PDI, SDI, objective
-        // value and rank parameters the jFunction-era model carried - the bundle declares none of them, and
-        // its 'network_functions' sheet is empty, so there is nothing to read. Settle what the trigger
-        // needs, declare it in the bundle, then read it here.
+        // PDI, SDI, their network ranks and the candidate selection result, as at the end of the previous period.
+        // The treatments trigger works on the segment this method returns and recalculates none of them, so miss
+        // this and every segment reaches the trigger as a non-candidate - the run completes and nothing is offered.
+        // See ReadPreviousPeriodResultsFromParameters.
+        segment.ReadPreviousPeriodResultsFromParameters(numParamValues, textParamValues);
 
         return segment;
     }

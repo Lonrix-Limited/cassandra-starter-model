@@ -839,65 +839,23 @@ public class RoadSegment
 
     private double _pavementDistressIndex;
     private double _surfaceDistressIndex;
-    
-    private double _objectiveDistressIndex;
-    private double _objectiveRemainingSurfaceLife;
-    private double _objectiveRutting;
-    private double _objectiveNaasra;
-    private double _objectiveValueRaw;
-    private double _objectiveValue;
-    private double _objectiveAreaUnderCurve;
 
-    // Convert all of the above backing variables into read-nonly properties
+    // The BCA objective-value fields went with the objective-value chain in stage 4. Nothing assigns or reads them.
 
     public double PavementDistressIndex { get { return _pavementDistressIndex; } }
 
     public double SurfaceDistressIndex { get { return _surfaceDistressIndex; } }
 
-
     /// <summary>
-    /// BCA objective distress condition placed on scaling curve (part 2 of 3)
-    /// </summary>
-    public double ObjectiveDistress { get { return _objectiveDistressIndex; } }
-
-    /// <summary>
-    /// BCA objective remaining surface life on scaling curve (part 1 of 3)
-    /// </summary>    
-    public double ObjectiveRemainingSurfaceLife { get { return _objectiveRemainingSurfaceLife; } }
-
-    /// <summary>
-    /// BCA objective rutting on scaling curve (part 3 of 3)
-    /// </summary>    
-    public double ObjectiveRutting { get { return _objectiveRutting; } }
-
-    /// <summary>
-    /// BCA objective roughness on scaling curve (part 3 of 3)
-    /// </summary>   
-    public double ObjectiveNaasra { get { return _objectiveNaasra; } }
-
-    /// <summary>
-    /// BCA objective raw value, based on weighted sum of the objective components
-    /// </summary>  
-    public double ObjectiveValueRaw { get { return _objectiveValueRaw; } }
-
-    /// <summary>
-    /// BCA objective value weighted by Road Type
-    /// </summary>
-    public double ObjectiveValue { get { return _objectiveValue; } }
-
-    /// <summary>
-    /// Goes to BCA objective (menu in Model Configuration), this is the BCA objective scaled by multiplying with treatment area to normalise the cost, 
-    /// to use for AUC calculation in BCA model
-    /// </summary>
-    public double ObjectiveAreaUnderCurve { get { return _objectiveAreaUnderCurve; } }
-
-    /// <summary>
-    /// Percent Rank of the PDI for this segment
+    /// Percent Rank (0 to 100) of the PDI for this segment across the network. Parameter 'par_pdi_rank', which is
+    /// OWNED BY THE NETWORK FUNCTIONS: the framework recomputes it from 'par_pdi' after initialisation and at the end
+    /// of every period. The domain model only reads it back in the factory and passes it through.
     /// </summary>
     public double PavementDistressIndexRank { get; set; }
 
     /// <summary>
-    /// Percent Rank of the SDI for this segment
+    /// Percent Rank (0 to 100) of the SDI for this segment across the network. Parameter 'par_sdi_rank', owned by
+    /// the network functions in the same way as <see cref="PavementDistressIndexRank"/>.
     /// </summary>
     public double SurfaceDistressIndexRank { get; set; }
 
@@ -987,19 +945,26 @@ public class RoadSegment
         _candidateSelectionInfo = csResult.Outcome;        
     }
 
-    public void UpdateFormulaValuesFromParameters(Dictionary<string, double> numParamValues, Dictionary<string, string> textParamValues)
-    {        
-        _surfaceDistressIndex = numParamValues["para_sdi"]; 
-        _pavementDistressIndex = numParamValues["para_pdi"]; 
-        _objectiveDistressIndex = numParamValues["para_obj_distress"]; 
-        _objectiveRemainingSurfaceLife = numParamValues["para_obj_rsl"]; 
-        _objectiveRutting = numParamValues["para_obj_rutting"]; 
-        _objectiveNaasra = numParamValues["para_obj_naasra"]; 
-        _objectiveValueRaw = numParamValues["para_obj_o"];
-        _objectiveValue = numParamValues["para_obj"];
-        _objectiveAreaUnderCurve = numParamValues["para_obj_auc"];        
-        _candidateSelectionInfo = textParamValues["para_csl_status"]; 
-        _isCandidateForTreatment = Convert.ToInt32(numParamValues["para_csl_flag"]); 
+    /// <summary>
+    /// Reads back the values <see cref="UpdateFormulaValues"/> worked out at the end of the previous period - PDI,
+    /// SDI, their network ranks and the candidate selection result. Called from the factory.
+    /// <para>This is not optional. <see cref="StarterModel.GetTreatmentCandidates"/> builds the segment from the
+    /// factory and never calls <see cref="UpdateFormulaValues"/>, so without this read-back the treatments trigger
+    /// sees every segment as not a candidate and returns nothing at all - not even a forced second coat - and, past
+    /// that gate, PDI, SDI and both ranks at zero. The run completes and nothing reports it.</para>
+    /// <para>Previous-period values are the design, not a compromise: the candidate selector adds one to the period
+    /// for exactly this lag, and the ranks can only be computed once every element has been processed. An index, its
+    /// rank and the candidate flag therefore always describe the same moment.</para>
+    /// </summary>
+    public void ReadPreviousPeriodResultsFromParameters(Dictionary<string, double> numParamValues,
+                                                       Dictionary<string, string> textParamValues)
+    {
+        _pavementDistressIndex = numParamValues["par_pdi"];
+        _surfaceDistressIndex = numParamValues["par_sdi"];
+        PavementDistressIndexRank = numParamValues["par_pdi_rank"];
+        SurfaceDistressIndexRank = numParamValues["par_sdi_rank"];
+        _isCandidateForTreatment = Convert.ToInt32(numParamValues["par_csl_flag"]);
+        _candidateSelectionInfo = textParamValues["par_csl_status"];
     }
 
     private double GetPavementDistressIndex(ModelBase frameworkModel, StarterModel domainModel, int currentPeriod)
@@ -1090,6 +1055,15 @@ public class RoadSegment
         numModParamValues("par_prerep_dz_rut", this.PreRepairCreditRut);
         numModParamValues("par_prerep_dz_iri", this.PreRepairCreditIri);
         numModParamValues("par_prerep_yrs", this.PreRepairYears);
+
+        // -- Distress indices, and their network ranks --
+        numModParamValues("par_pdi", this.PavementDistressIndex);
+        numModParamValues("par_sdi", this.SurfaceDistressIndex);
+        // The two ranks are network function outputs: whatever is written here is overwritten once every element
+        // has been processed. They are passed through rather than left unwritten so that the parameter never
+        // holds a stray zero between the element step and the network calculation.
+        numModParamValues("par_pdi_rank", this.PavementDistressIndexRank);
+        numModParamValues("par_sdi_rank", this.SurfaceDistressIndexRank);
     }
     #endregion
 
