@@ -595,7 +595,9 @@ public class RoadSegment
 
     /// <summary>
     /// Central deflection (D0) in mm, from the 75th percentile Lightweight Deflectometer measurement.
-    /// A static input measure - it is not modelled forward in time.
+    /// A static input measure - it is not modelled forward in time - EXCEPT on a rebuilt pavement, where a
+    /// rehabilitation replaces it with the group median and it is carried in 'par_d0' from then on. See
+    /// RoadSegmentFactory.GetFromModel for why it is read back only for those segments.
     /// </summary>
     public double CentralDeflection { get; set; }
 
@@ -1060,8 +1062,9 @@ public class RoadSegment
         numModParamValues("par_pdi", this.PavementDistressIndex);
         numModParamValues("par_sdi", this.SurfaceDistressIndex);
         // The two ranks are network function outputs: whatever is written here is overwritten once every element
-        // has been processed. They are passed through rather than left unwritten so that the parameter never
-        // holds a stray zero between the element step and the network calculation.
+        // has been processed, so the write changes no result - the framework seeds every parameter with the
+        // previous period's value before the step anyway. They are written to keep this list complete against
+        // the 'parameters' sheet, so that a gap here still means a parameter was forgotten.
         numModParamValues("par_pdi_rank", this.PavementDistressIndexRank);
         numModParamValues("par_sdi_rank", this.SurfaceDistressIndexRank);
     }
