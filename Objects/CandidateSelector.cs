@@ -59,6 +59,14 @@ public static class CandidateSelector
                     $"SLA = {Math.Round(segment.SurfaceAchievedLifePercent, 2)}: below threshold ({domainModel.Constants.CSMinSlaToTreatCs})");
             }
 
+            // Block, concrete and 'other' surfaces are due a repair on AGE, not on condition, and they
+            // cannot pass the distress test below: none of them is given flushing or ravelling, and
+            // blocks are given no cracking either, so a block segment's surface distress index is zero
+            // for the whole run and its pavement index is rut excess on its own. Gated on distress, the
+            // repair these surfaces exist to receive would simply never be offered. The treatments
+            // trigger applies the same condition before it names the treatment.
+            if (segment.BirthdayRepairNeeded) { return new CandidateSelectionResult(true, "Birthday Repair Needed"); }
+
             // Finally, check if the segment meets the minimum distress indices for treatment
             if (segment.SurfaceDistressIndex < domainModel.Constants.CSMinSDIToTreat && segment.PavementDistressIndex < domainModel.Constants.CSMinPDIToTreat)
             {

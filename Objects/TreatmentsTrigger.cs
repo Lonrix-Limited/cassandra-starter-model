@@ -190,7 +190,12 @@ public class TreatmentsTrigger
     {
         //n : pcal_can_treat_flag = 1 AND n : pcal_next_surf_blocks_flag = 1 AND n : period >= file_earliest_treat_period AND n : para_surf_remain_life <= 1
 
-        if (segment.CanTreatFlag == false) return; // If the segment cannot be treated, do not add a treatment
+        // Can be treated, next surface is blocks/concrete/other, and a year or less of surface life
+        // left. Held on RoadSegment because the candidate selector reads the same condition to let these
+        // segments past the distress index thresholds, which none of them can clear.
+        if (segment.BirthdayRepairNeeded == false) return;
+        if (iPeriod < segment.EarliestTreatmentPeriod) return; // If the period is less than the earliest treatment period, do not add a treatment
+
         string treatmentName = "";
 
         switch (segment.NextSurface)
@@ -205,12 +210,10 @@ public class TreatmentsTrigger
                 treatmentName = TreatmentNames.OtherRepairs;
                 break;
             default:
-                //If we get here, it is ChipSeal or Asphalt, which are not valid for this treatment
+                //Unreachable once BirthdayRepairNeeded has passed, which tests these same three values.
+                //Kept so that adding a surface class to one list and not the other cannot fall through.
                 return;
         }
-
-        if (segment.SurfaceRemainingLife > 1) return; // If the surface remaining life is greater than 1, do not add a treatment
-        if (iPeriod < segment.EarliestTreatmentPeriod) return; // If the period is less than the earliest treatment period, do not add a treatment
 
         //If we get here, a birthday treatment is valid
         double quantity = segment.AreaSquareMetre;

@@ -621,8 +621,7 @@ public class DeteriorationModels
     /// </summary>
     public double GetRavelling(RoadSegment segment, double surfaceAgeYears)
     {
-        string surfaceClass = segment.SurfaceClass.Trim();
-        if (surfaceClass != "ac" && surfaceClass != "ogpa")
+        if (segment.SurfaceClass != "ac" && segment.SurfaceClass != "ogpa")
         {
             return 0.0;
         }

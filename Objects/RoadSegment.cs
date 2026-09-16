@@ -126,11 +126,19 @@ public class RoadSegment
     /// <para>Set from the input column, and overwritten after every treatment from the
     /// 'treat_surf_class' lookup, so a treatment can change it: a chipseal resurfacing on an OGPA
     /// segment leaves it reading 'cs'.</para>
+    ///
+    /// <para>THE SETTER TRIMS AS WELL AS LOWER-CASING, AND THAT IS WHY NOTHING ELSE HAS TO. Every test
+    /// in this model compares this value against a bare lower-case literal - 'cs' in the flushing rule
+    /// and the chip seal flag, 'ac' and 'ogpa' in the ravelling rule, 'block' in
+    /// <see cref="IsBlockPaving"/>, and the two surface life thresholds in the candidate selector. A
+    /// client file carrying a trailing space in its surface class column would fail every one of those
+    /// silently, each in a different direction. Normalising once on assignment is the only place that
+    /// can be got right for all of them at once.</para>
     /// </summary>
     public string SurfaceClass
     {
         get => _surfaceClass;
-        set => _surfaceClass = value?.ToLower() ?? string.Empty;
+        set => _surfaceClass = value?.Trim().ToLower() ?? string.Empty;
     }
 
     /// <summary>
@@ -171,8 +179,8 @@ public class RoadSegment
 
     /// <summary>
     /// Whether the surface is block paving, by a surface class starting with 'block' - 'blocks' in this
-    /// model's data. Calculated from <see cref="SurfaceClass"/>, which is already lower-cased; trimmed here
-    /// so a stray space in a client file does not hide a block segment.
+    /// model's data. Calculated from <see cref="SurfaceClass"/>, whose setter has already trimmed and
+    /// lower-cased it, so the test here is a bare ordinal comparison.
     ///
     /// <para>It follows the CURRENT surface class, so after a treatment that changes the class it answers
     /// for the new surface, not the one in the input file.</para>
@@ -185,14 +193,27 @@ public class RoadSegment
     {
         get
         {
-            return this.SurfaceClass.Trim().StartsWith("block", StringComparison.Ordinal);
+            return this.SurfaceClass.StartsWith("block", StringComparison.Ordinal);
         }
     }
 
+    private string _nextSurface = string.Empty;
+
     /// <summary>
     /// Replacement surfacing type. Could be 'ac', 'cs', 'blocks', 'concrete' etc.
+    ///
+    /// <para>Trimmed and lower-cased on assignment for the same reason <see cref="SurfaceClass"/> is,
+    /// and it carries more weight here because more of the trigger turns on it: this value decides
+    /// whether a segment is offered a chip seal route or an asphalt one at all, and - through
+    /// <see cref="BirthdayRepairNeeded"/> - whether a block, concrete or 'other' segment is offered
+    /// anything. A capital letter in the client's 'inp_next_surf' column would drop the segment out of
+    /// every one of those branches without a word.</para>
     /// </summary>
-    public string NextSurface { get; set; } = string.Empty;
+    public string NextSurface
+    {
+        get => _nextSurface;
+        set => _nextSurface = value?.Trim().ToLower() ?? string.Empty;
+    }
 
     /// <summary>
     /// Surfacing date as a text/string value in ISO format 'yyyymmdd', as parsed by ParseISODateNoTime.
@@ -275,6 +296,33 @@ public class RoadSegment
                 return true; 
             } 
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Whether the segment is due the birthday repair that block, concrete and 'other' surfaces get in
+    /// place of a resurfacing: its replacement surface is one of those three, it may be treated, and its
+    /// surface has a year or less of life left.
+    ///
+    /// <para>THIS IS THE WHOLE TRIGGER CONDITION BAR THE PERIOD CHECK, AND IT LIVES HERE BECAUSE TWO
+    /// PLACES READ IT. The treatments trigger uses it to decide whether to offer the repair, and the
+    /// candidate selector uses it to let the segment past the distress index thresholds, which these
+    /// surfaces cannot clear. Block paving carries no cracking, no flushing and no ravelling, so its
+    /// surface distress index is zero in every period and its pavement index is rut excess alone - a
+    /// block segment would need more than 8 mm of rut to be considered for a repair it is due purely on
+    /// age. Split across the two files the condition would drift, and the symptom would be a treatment
+    /// that quietly stops appearing in the programme.</para>
+    /// </summary>
+    public bool BirthdayRepairNeeded
+    {
+        get
+        {
+            if (this.CanTreatFlag == false) return false;
+            if (this.SurfaceRemainingLife > 1) return false;
+
+            // The three replacement surfaces that take a repair rather than a resurfacing. The trigger
+            // maps these same three onto treatment names - keep the two lists in step.
+            return this.NextSurface == "blocks" || this.NextSurface == "concrete" || this.NextSurface == "other";
         }
     }
 
