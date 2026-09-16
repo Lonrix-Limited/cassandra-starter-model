@@ -6,9 +6,10 @@ from. Clone it, rename it, and change it to fit your network.
 It builds clean with no warnings, so a *build* failure after you start editing is attributable to the
 change you just made. `jcass-dm check` passes every rule it can apply locally.
 
-**It has not yet been run against a real project.** Everything in it has been checked by reading the
-code against the setup spreadsheets, which cannot catch a model that computes the wrong number. The
-first thing to do with your copy is run it and watch the early periods.
+**It has been run against a real project.** Read that for what it is worth: it means the model
+completes, every parameter comes back populated and the early periods behave — not that its
+coefficients suit your network, which is a separate question and the subject of the next section. The
+first thing to do with your copy is still to run it and watch the early periods.
 
 ---
 
@@ -38,11 +39,29 @@ without a positive one. The two cracking-onset files are logistic fits and have 
 randomness is each segment's own uniform draw — so do not add one. The two below-threshold cracking
 files additionally carry `(ZeroShare)`.
 
-**What to do about it.** Refitting these is a statistical exercise on your own condition survey
-history, not a modelling one, and it is not something to guess at. **Lonrix can carry out the refit
-for you, or set your team up to do it** — talk to support@lonrix.com before your first real run. If a
-refit introduces a covariate this model does not know how to evaluate, the model stops at setup and
-names the file and the term, rather than ignoring it silently.
+**THE MODEL SHAPES WERE CHOSEN SO THAT A SINGLE CROSS-SECTIONAL DATASET CAN FIT THEM, AND THAT IS
+DELIBERATE.** Every condition model here is a **level as a function of surface age** — what cracking,
+rut depth or roughness a segment of this age, traffic, deflection and heavy vehicle share is expected
+to carry. Not one of them reads the previous period's value to produce the next. So fitting them does
+not require years of repeat surveys on the same segments: each segment contributes one observation at
+its own surface age, and the spread of surface ages across a network does the work that time would
+otherwise have to do. **One snapshot fits all ten files — and it is normally the model input set you
+already have**, which is the same dataset you are about to run the forecast on. Check it against your
+own file: the four covariates are the surfacing date, `inp_adt`, `inp_lmd_d0_75th` and
+`inp_heavy_perc`, and the three fitted responses are `inp_pct_cracks`, `inp_rut_mean` and
+`inp_iri_mean`. If those columns are populated, the data for a refit is in your hands already.
+
+**What that does not mean is that it is easy.** It is real analysis work, and it is where the value of
+the model is won or lost. A cross-section has to be handled for what it is: the older surfaces still
+standing are the ones that were never bad enough to reseal, so a naive fit reads them as more durable
+than they are. The cracking models are a two-part fit with the severity part left-truncated at the
+onset threshold, and every lognormal fit has to return a residual standard deviation, because that is
+what makes two identical-looking segments deteriorate differently in the forecast.
+
+**Lonrix can carry out the fit for you, or set your team up to do it** — talk to support@lonrix.com
+before your first real run, and have your input dataset to hand. If a refit introduces a covariate
+this model does not know how to evaluate, the model stops at setup and names the file and the term,
+rather than ignoring it silently.
 
 The model reads only four covariates: log of capped surface age, log of surveyed average daily
 traffic, central deflection, and heavy vehicle percentage. A term absent from a fit contributes
