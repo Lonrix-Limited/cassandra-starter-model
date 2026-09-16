@@ -107,7 +107,8 @@ public class DeteriorationModels
     public double CrackOnsetProbability(RoadSegment segment, double surfaceAgeYears)
     {
         FittedModel model = this.ModelFor(_coefficients.CrackOnset, segment, "cracking onset");
-        double eta = model.LinearPredictor(this.LogAge(surfaceAgeYears), LogTraffic(segment.SurveyedAverageDailyTraffic),
+        double eta = model.LinearPredictor(this.CalibratedLogAgeCrackOnset(segment, surfaceAgeYears),
+                                           LogTraffic(segment.SurveyedAverageDailyTraffic),
                                            segment.CentralDeflection, segment.HeavyVehiclePercentage);
         eta += this.RehabilitationOffsetCrackOnset(segment);
 
@@ -132,8 +133,50 @@ public class DeteriorationModels
     public double CrackSeverityMu(RoadSegment segment, double surfaceAgeYears)
     {
         FittedModel model = this.ModelFor(_coefficients.CrackSeverity, segment, "cracking severity");
-        return model.LinearPredictor(this.LogAge(surfaceAgeYears), LogTraffic(segment.SurveyedAverageDailyTraffic),
+        return model.LinearPredictor(this.CalibratedLogAgeCrackSeverity(segment, surfaceAgeYears),
+                                     LogTraffic(segment.SurveyedAverageDailyTraffic),
                                      segment.CentralDeflection, segment.HeavyVehiclePercentage);
+    }
+
+    /// <summary>
+    /// The age term for cracking ONSET, with the calibration slope factor applied.
+    ///
+    /// <para>WHAT IT DOES. Scaling the age term scales the fitted age coefficient, because the term
+    /// enters the linear predictor as coefficient x log(age). At 1.0 - as delivered - it changes
+    /// nothing at all, and the model is exactly the fitted one.</para>
+    ///
+    /// <para>WHY A SLOPE AND NOT AN OFFSET, which is the instinct and does not work here. Year zero
+    /// draws each segment's onset position conditional on what its survey said, so lifting the whole
+    /// curve lifts the drawn positions with it and the share cracking later barely moves. A steeper
+    /// slope is not absorbed that way: the conditioning pins the curve at today's age and the extra
+    /// steepness all falls after it, which is where the calibration is wanted.</para>
+    ///
+    /// <para>IT PIVOTS AT SURFACE AGE 0.5 YEARS, where log(age + 0.5) is zero. Above that a factor
+    /// above 1.0 raises the probability and below it lowers it slightly - immaterial, because no
+    /// segment cracks in its first six months, but worth knowing rather than discovering.</para>
+    ///
+    /// <para>Applied HERE, in the one method every use of the onset probability reads - the year-on-year
+    /// comparison, the year-zero inversion and the Resetter's draw - for the same reason the
+    /// rehabilitation offset is. Applied at a call site instead, a segment would be handed a position
+    /// that contradicts the probability it is later tested against.</para>
+    /// </summary>
+    private double CalibratedLogAgeCrackOnset(RoadSegment segment, double surfaceAgeYears)
+    {
+        return this.LogAge(surfaceAgeYears) * _constants.GetCrackOnsetAgeSlopeFactor(segment.DeteriorationGroup);
+    }
+
+    /// <summary>
+    /// The age term for cracking SEVERITY, with the calibration slope factor applied. Same mechanism and
+    /// the same pivot as the onset factor above.
+    ///
+    /// <para>The offset-versus-slope argument is even starker here: year zero INVERTS the surveyed
+    /// cracking to recover the segment's deviate, so a constant added to this mean is subtracted straight
+    /// back out of the deviate and the whole trajectory is unchanged. Only the slope survives the
+    /// inversion.</para>
+    /// </summary>
+    private double CalibratedLogAgeCrackSeverity(RoadSegment segment, double surfaceAgeYears)
+    {
+        return this.LogAge(surfaceAgeYears) * _constants.GetCrackSeverityAgeSlopeFactor(segment.DeteriorationGroup);
     }
 
     /// <summary>

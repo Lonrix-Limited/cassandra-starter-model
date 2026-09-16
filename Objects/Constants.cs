@@ -88,6 +88,8 @@ public class Constants
     private Dictionary<string, double> _staleSurveyResurfacingRut = new Dictionary<string, double>();
     private Dictionary<string, double> _staleSurveyResurfacingIri = new Dictionary<string, double>();
     private Dictionary<string, double> _preRepairDecayTauYears = new Dictionary<string, double>();
+    private Dictionary<string, double> _crackOnsetAgeSlopeFactor = new Dictionary<string, double>();
+    private Dictionary<string, double> _crackSeverityAgeSlopeFactor = new Dictionary<string, double>();
 
 
     /// <summary>
@@ -473,6 +475,45 @@ public class Constants
     }
 
     /// <summary>
+    /// Calibration factor on the AGE term of the cracking ONSET model. 1.0 as delivered, which is the
+    /// fitted model unchanged. Above 1.0, segments start cracking sooner as they age.
+    ///
+    /// <para>WHAT THIS IS FOR. The fitted coefficients come from one network at one moment. If a run
+    /// shows too few segments cracked at high surface ages, this is the lever - it moves the SHARE of
+    /// segments that have cracked, not how much cracking each one carries, which is the severity factor
+    /// below.</para>
+    ///
+    /// <para>WHY A SLOPE RATHER THAN A LEVEL OFFSET, because an offset is the instinct and it does not
+    /// work. Year zero draws each segment's onset position conditional on what its own survey said, so
+    /// raising the whole curve raises the drawn positions with it and almost nothing changes. Multiplying
+    /// the age term is not absorbed that way: the conditioning pins the curve at today's age, and the
+    /// added steepness all lands in the years after it.</para>
+    ///
+    /// <para>IT IS A CALIBRATION FACTOR, NOT A FIT. Anything other than 1.0 means the model is no longer
+    /// the delivered fit, and a refit should start by returning it to 1.0. Check
+    /// 'deterioration/age_cap_years' first: past the cap the age term stops growing at all, so no slope
+    /// factor can move a surface already older than the cap.</para>
+    /// </summary>
+    public double GetCrackOnsetAgeSlopeFactor(string deteriorationGroup)
+    {
+        return GetForGroup(_crackOnsetAgeSlopeFactor, deteriorationGroup, CalibrationSet, "crack_onset_age_slope");
+    }
+
+    /// <summary>
+    /// Calibration factor on the AGE term of the cracking SEVERITY model. 1.0 as delivered. Above 1.0,
+    /// cracking grows faster with age on segments that have already cracked.
+    ///
+    /// <para>The slope-not-offset argument is even starker here than for onset: year zero INVERTS the
+    /// surveyed cracking to recover the segment's deviate, so a constant added to the severity mean is
+    /// subtracted straight back out of that deviate and the trajectory does not move at all. Only the
+    /// slope survives the inversion.</para>
+    /// </summary>
+    public double GetCrackSeverityAgeSlopeFactor(string deteriorationGroup)
+    {
+        return GetForGroup(_crackSeverityAgeSlopeFactor, deteriorationGroup, CalibrationSet, "crack_severity_age_slope");
+    }
+
+    /// <summary>
     /// Factor applied to a surveyed rut depth when the segment was RESURFACED after that survey, so
     /// that year zero describes the surface the segment actually has.
     /// <para>The chipseal factor is 1.0 on purpose - a seal follows the shape of what it is laid on and
@@ -746,6 +787,7 @@ public class Constants
     private const string StaleSurveyResurfacingSet = "stale_survey_resurf";
     private const string PreRepairSet = "pre_repair";
     private const string DistressIndexSet = "distress_index";
+    private const string CalibrationSet = "calibration";
 
     // The four sets on the 'lkp_unit_rates' sheet. See the Treatment unit rates region above.
     private const string UnitRatesSet = "unit_rates_general";
@@ -798,6 +840,27 @@ public class Constants
     /// still look entirely plausible. A negative or zero multiplier would let the growth term reduce
     /// rut, which nothing else in this model does.</para>
     /// </summary>
+    /// <summary>
+    /// Refuses a calibration factor that is not positive, at setup rather than mid-run.
+    /// <para>Zero would flatten the age term completely, so cracking would stop depending on age at all -
+    /// and it would do it quietly, looking like a model that simply predicts little cracking. A negative
+    /// factor would reverse the relationship and make old surfaces crack LESS than new ones. Neither is
+    /// a calibration anybody means, and both are a plausible typo for 1.0.</para>
+    /// </summary>
+    private void ValidateCalibrationFactors()
+    {
+        foreach (string group in DeteriorationModels.ModelGroups)
+        {
+            if (_crackOnsetAgeSlopeFactor[group] <= 0.0 || _crackSeverityAgeSlopeFactor[group] <= 0.0)
+            {
+                throw new Exception($"Lookup set '{CalibrationSet}' in lookups.xlsx has a cracking age slope " +
+                                    $"factor of zero or less for deterioration group '{group}'. Both " +
+                                    $"'crack_onset_age_slope_{group}' and 'crack_severity_age_slope_{group}' must " +
+                                    $"be greater than zero; 1.0 means the fitted model unchanged.");
+            }
+        }
+    }
+
     private void ValidateRutGrowthHcv()
     {
         if (_detRutGrowthHcvHigh <= _detRutGrowthHcvLow)
@@ -930,7 +993,14 @@ public class Constants
             _staleSurveyResurfacingRut[group] = GetNumber(lookupSets, StaleSurveyResurfacingSet, $"rut_{group}");
             _staleSurveyResurfacingIri[group] = GetNumber(lookupSets, StaleSurveyResurfacingSet, $"iri_{group}");
             _preRepairDecayTauYears[group] = GetNumber(lookupSets, PreRepairSet, $"decay_tau_yrs_{group}");
+
+            // Cracking calibration. 1.0 in the delivered spreadsheet, so the fitted models are unchanged
+            // until somebody deliberately turns one of these up.
+            _crackOnsetAgeSlopeFactor[group] = GetNumber(lookupSets, CalibrationSet, $"crack_onset_age_slope_{group}");
+            _crackSeverityAgeSlopeFactor[group] = GetNumber(lookupSets, CalibrationSet, $"crack_severity_age_slope_{group}");
         }
+
+        ValidateCalibrationFactors();
 
     }
 
