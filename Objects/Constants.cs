@@ -831,16 +831,6 @@ public class Constants
     }
 
     /// <summary>
-    /// Checks the four heavy-traffic rut growth numbers against each other, at setup, before a single
-    /// period is modelled.
-    ///
-    /// <para>THE ORDER CHECK IS NOT COSMETIC. The multiplier interpolates on
-    /// (hcv - hcv_low) / (hcv_high - hcv_low): equal breakpoints divide by zero, and reversed ones
-    /// invert the adjustment silently - the quietest roads would rut fastest and the forecast would
-    /// still look entirely plausible. A negative or zero multiplier would let the growth term reduce
-    /// rut, which nothing else in this model does.</para>
-    /// </summary>
-    /// <summary>
     /// Refuses a calibration factor that is not positive, at setup rather than mid-run.
     /// <para>Zero would flatten the age term completely, so cracking would stop depending on age at all -
     /// and it would do it quietly, looking like a model that simply predicts little cracking. A negative
@@ -861,6 +851,16 @@ public class Constants
         }
     }
 
+    /// <summary>
+    /// Checks the four heavy-traffic rut growth numbers against each other, at setup, before a single
+    /// period is modelled.
+    ///
+    /// <para>THE ORDER CHECK IS NOT COSMETIC. The multiplier interpolates on
+    /// (hcv - hcv_low) / (hcv_high - hcv_low): equal breakpoints divide by zero, and reversed ones
+    /// invert the adjustment silently - the quietest roads would rut fastest and the forecast would
+    /// still look entirely plausible. A negative or zero multiplier would let the growth term reduce
+    /// rut, which nothing else in this model does.</para>
+    /// </summary>
     private void ValidateRutGrowthHcv()
     {
         if (_detRutGrowthHcvHigh <= _detRutGrowthHcvLow)

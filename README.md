@@ -85,8 +85,13 @@ segment is recorded as clamped, because it does *not* reproduce its surveyed val
 fitted models were never fitted to blocks. So a segment whose surface class starts with `block` has
 zero cracking for the whole run: its `inp_pct_cracks` reading is discarded at year zero (recorded as
 inferred, `par_crack_init_src = 2`), and `DeteriorationModels.GetCracking` returns zero for it in every
-period. If your crack survey does not have this problem and you want blocks modelled, remove the
-`segment.IsBlockPaving` checks in both places. The property itself lives on `RoadSegment`.
+period. A third check, in `DeteriorationModels.ApplyPreRepairCredits`, withholds the pre-repair
+cracking credit on blocks, because a credit measured from a forced zero would be the whole distance to
+the clamp. If your crack survey does not have this problem and you want blocks modelled, remove all
+three `segment.IsBlockPaving` checks - in `Initialiser.InitialiseCracking`, in
+`DeteriorationModels.GetCracking` and in `DeteriorationModels.ApplyPreRepairCredits` - because leaving
+the third would deny a genuinely cracked block segment any credit for its repairs. The property itself
+lives on `RoadSegment`.
 
 **The inversion and the forward model must mirror each other term for term.** If you add anything to
 the forward model outside the lognormal core, the inversion has to undo it, or year zero stops
