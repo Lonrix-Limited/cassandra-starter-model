@@ -402,3 +402,7 @@ FodyWeavers.xsd
 
 # Fritz's own working note. Local to Lonrix - it is not part of what a client clones.
 ab-next-session.md
+
+# Local build bundles of the model, not source
+StarterModel_for_debug.zip
+starter_model_dll.zip
